@@ -1,11 +1,5 @@
+import type { PackageChange } from 'lockdelta';
 import type { RegistryCheck } from '../../types.js';
-
-// PackageChange in the upcoming lockdelta branch carries registry URLs.
-// The published 0.1.2 does not, so we read them via a safe cast.
-interface WithRegistry {
-  old_registry_url?: string;
-  new_registry_url?: string;
-}
 
 const PUBLIC_REGISTRY_PREFIXES = [
   'https://registry.npmjs.org',
@@ -30,7 +24,7 @@ function parseVersion(version: string): [number, number, number] {
   return [a ?? 0, b ?? 0, c ?? 0];
 }
 
-function confusionHeuristics(version: string, changeType: string, reg: WithRegistry): string[] {
+function confusionHeuristics(version: string, changeType: string, reg: Pick<PackageChange, 'old_registry_url' | 'new_registry_url'>): string[] {
   const reasons: string[] = [];
   const [major, minor, patch] = parseVersion(version);
 
@@ -66,7 +60,7 @@ function confusionHeuristics(version: string, changeType: string, reg: WithRegis
 }
 
 export function checkRegistry(
-  change: { name: string; change_type: string; new_version: string | null } & WithRegistry,
+  change: Pick<PackageChange, 'name' | 'change_type' | 'new_version' | 'old_registry_url' | 'new_registry_url'>,
 ): RegistryCheck | undefined {
   const { old_registry_url, new_registry_url, new_version } = change;
 

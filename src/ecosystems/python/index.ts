@@ -150,9 +150,7 @@ export class PythonAnalyzer implements EcosystemAnalyzer {
       ecosystem: this.ecosystem,
     } as const;
 
-    const registryCheck = checkRegistry(
-      change as typeof change & { old_registry_url?: string; new_registry_url?: string },
-    );
+    const registryCheck = checkRegistry(change);
 
     if (change_type === 'removed') {
       return {

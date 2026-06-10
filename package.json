@@ -56,7 +56,7 @@
     "adm-zip": "^0.5.17",
     "commander": "14.0.3",
     "diff": "^9.0.0",
-    "lockdelta": "^0.1.2",
+    "lockdelta": "^0.1.3",
     "tar": "^7.5.16"
   },
   "devDependencies": {

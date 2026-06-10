@@ -47,9 +47,7 @@ export class JavaScriptAnalyzer implements EcosystemAnalyzer {
     } as const;
     const safeName = name.replace(/\//g, '__');
 
-    const registryCheck = checkRegistry(
-      change as typeof change & { old_registry_url?: string; new_registry_url?: string },
-    );
+    const registryCheck = checkRegistry(change);
 
     if (change_type === 'removed') {
       return {
