@@ -1,0 +1,5 @@
+set -e
+
+pnpm run check
+
+pnpm run build
