@@ -51,6 +51,8 @@
     "url": "https://github.com/lachaib/lockscan"
   },
   "dependencies": {
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1",
     "adm-zip": "^0.5.17",
     "commander": "14.0.3",
     "diff": "^9.0.0",

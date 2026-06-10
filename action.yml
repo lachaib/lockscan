@@ -1,0 +1,116 @@
+name: 'lockscan'
+description: 'Security analysis of lockfile changes — detects supply-chain attacks in dependency updates'
+author: 'lachaib'
+
+branding:
+  icon: 'shield'
+  color: 'red'
+
+inputs:
+  lockdelta-output:
+    description: >
+      The lockdelta JSON diff report. Accepts a raw JSON string (e.g. from
+      ${{ steps.lockdelta.outputs.diff }}) or a file path written by lockdelta's
+      json-to-file option.
+    required: true
+
+  github-token:
+    description: >
+      GitHub token for the repo release check and PR comment posting.
+      Defaults to the built-in GITHUB_TOKEN.
+    required: false
+    default: ${{ github.token }}
+
+  platform:
+    description: >
+      Target platform(s). Format: os-arch[-pyver] (e.g. linux-x86_64-3.12,
+      macos-arm64). Separate multiple platforms with commas or newlines.
+      Defaults to the runner's host platform.
+    required: false
+
+  only:
+    description: >
+      Restrict analysis to these change types. Comma-separated: added, updated,
+      removed. Defaults to all three.
+    required: false
+
+  markdown:
+    description: >
+      Generate a markdown summary of findings and expose it as the summary output.
+      The GitHub step summary is always written regardless of this flag.
+    required: false
+    default: 'false'
+
+  markdown-to-file:
+    description: >
+      Write the markdown summary to this file path.
+    required: false
+
+  sarif-to-file:
+    description: >
+      Write a SARIF 2.1.0 report to this file path. Use together with
+      actions/upload-sarif to surface findings in GitHub's Security /
+      Code Scanning tab with inline PR annotations and alert lifecycle.
+    required: false
+
+  annotate:
+    description: >
+      Emit GitHub workflow annotations on the dependency manifest file
+      (package.json, pyproject.toml, etc.) for each finding. Annotations
+      appear as inline comments on the PR diff. Set to 'false' to disable.
+    required: false
+    default: 'true'
+
+  post-comment:
+    description: >
+      Post or update a single PR comment with the markdown summary.
+      'true' always posts or updates.
+      'if-findings' posts when findings exist; updates to a "resolved" message
+      when a subsequent run finds nothing.
+      'false' never posts.
+    required: false
+    default: 'false'
+
+  fail-on:
+    description: >
+      Fail the step when findings at or above this severity are detected.
+      critical — fail on CRITICAL findings only.
+      high     — fail on HIGH or CRITICAL.
+      any      — fail on any finding.
+      never    — advisory-only mode; never fails.
+    required: false
+    default: 'never'
+
+  write-summary:
+    description: >
+      Write the markdown summary to the GitHub step summary
+      ($GITHUB_STEP_SUMMARY). Set to 'false' to disable.
+    required: false
+    default: 'true'
+
+outputs:
+  report:
+    description: >
+      The full security report as a JSON string.
+  summary:
+    description: >
+      Markdown summary of findings. Set when markdown: 'true' or when
+      post-comment is enabled.
+  sarif:
+    description: >
+      SARIF 2.1.0 report as a JSON string. Only set when sarif-to-file is
+      specified.
+  has-findings:
+    description: >
+      'true' if any security findings were identified, 'false' otherwise.
+      Useful for conditional downstream steps.
+  has-critical:
+    description: >
+      'true' if any CRITICAL severity findings were identified.
+  has-high:
+    description: >
+      'true' if any HIGH or CRITICAL severity findings were identified.
+
+runs:
+  using: 'node24'
+  main: 'dist/action.cjs'

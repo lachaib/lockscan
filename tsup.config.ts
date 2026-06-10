@@ -17,4 +17,14 @@ export default defineConfig([
     banner: { js: '#!/usr/bin/env node' },
     sourcemap: true,
   },
+  {
+    entry: { action: 'src/action.ts' },
+    format: ['cjs'],
+    target: 'node24',
+    dts: false,
+    sourcemap: true,
+    // Bundle all npm packages into the single CJS file — the Actions runner
+    // does not install node_modules from the repo.
+    noExternal: [/.*/],
+  },
 ]);

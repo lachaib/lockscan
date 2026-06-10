@@ -1,5 +1,8 @@
 set -e
 
+# Fail fast on lint errors — run pnpm run check:fix locally to resolve
 pnpm run check
 
+# Rebuild compiled output and stage it so dist/ stays in sync with src/
 pnpm run build
+git add -f dist/action.cjs dist/action.cjs.map
