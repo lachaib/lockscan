@@ -60,9 +60,32 @@ const pythonResolver: ManifestResolver = {
   },
 };
 
+const denoResolver: ManifestResolver = {
+  ecosystem: 'deno',
+  manifestCandidates(lockfilePath, workspace) {
+    const dir = lockfilePath ? join(workspace, dirname(lockfilePath)) : workspace;
+    return [join(dir, 'deno.json'), join(dir, 'deno.jsonc')];
+  },
+  findPackageLine(content, packageName) {
+    // packageName is either a bare npm name ("chalk") or a JSR name ("jsr:@std/http").
+    // In deno.json the import values contain the full specifier, e.g.:
+    //   "chalk": "npm:chalk@^5",  "std/http": "jsr:@std/http@^0.224"
+    // Search within the import values rather than the alias keys.
+    const specifier = packageName.startsWith('jsr:') ? packageName : `npm:${packageName}`;
+    const escaped = specifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`"${escaped}`);
+    const lines = content.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (re.test(lines[i])) return i + 1;
+    }
+    return null;
+  },
+};
+
 const resolvers = new Map<string, ManifestResolver>([
   ['javascript', npmResolver],
   ['python', pythonResolver],
+  ['deno', denoResolver],
 ]);
 
 export function registerManifestResolver(resolver: ManifestResolver): void {
