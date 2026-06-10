@@ -235,7 +235,7 @@ lockdelta diff base.lock head.lock | lockscan [options]
 
 | Option | Description |
 |---|---|
-| `--platform <spec>` | Target platform(s). Format: `os-arch[-pyver]` (e.g. `linux-x86_64-3.12`, `macos-arm64`). Repeatable. Defaults to current host. |
+| `--platform <spec>` | Target platform(s). Format: `os/arch[/pyver]` (e.g. `linux/x86_64/3.12`, `macos/arm64`). Repeatable. Defaults to current host. |
 | `--only <types>` | Restrict to `added`, `updated`, or `removed`. Comma-separated. |
 | `--format json\|text` | Output format. Default: `text`. |
 
@@ -251,6 +251,115 @@ If no `--platform` is specified, `lockscan` detects the current OS and architect
 
 1. `.python-version` in the working directory
 2. `[tool.python]` or `[tool.rye]` tables in `pyproject.toml`
+
+---
+
+## GitHub Action
+
+`lockscan` ships as a GitHub Action (`lachaib/lockscan`). It consumes the JSON diff produced by [lockdelta](https://github.com/nicolo-ribaudo/lockdelta) and surfaces findings as step annotations, a step summary, PR comments, and/or a SARIF report.
+
+### Inputs
+
+| Input | Required | Default | Description |
+|---|---|---|---|
+| `lockdelta-output` | yes | — | The lockdelta JSON diff. Accepts a raw JSON string (e.g. `${{ steps.lockdelta.outputs.diff }}`) or a file path written by lockdelta's `json-to-file` option. |
+| `github-token` | no | `${{ github.token }}` | GitHub token for the repo release check and PR comment posting. |
+| `platform` | no | host platform | Target platform(s). Format: `os/arch[/pyver]` (e.g. `linux/x86_64/3.12`, `macos/arm64`). Comma- or newline-separated. |
+| `only` | no | all | Restrict analysis to specific change types. Comma-separated: `added`, `updated`, `removed`. |
+| `markdown` | no | `false` | Generate a markdown summary and expose it as the `summary` output. |
+| `markdown-to-file` | no | — | Write the markdown summary to this file path. |
+| `sarif-to-file` | no | — | Write a SARIF 2.1.0 report to this file path. Use with `actions/upload-sarif` to surface findings in the Security / Code Scanning tab. |
+| `annotate` | no | `true` | Emit workflow annotations on the dependency manifest file for each finding. Set to `false` to disable. |
+| `post-comment` | no | `false` | Post or update a PR comment with the markdown summary. `true` always posts/updates. `if-findings` posts when findings exist and updates to a "resolved" message when clean. `false` never posts. |
+| `fail-on` | no | `never` | Fail the step when findings at or above this severity are detected: `critical`, `high`, `any`, or `never`. |
+| `write-summary` | no | `true` | Write the markdown summary to the GitHub step summary (`$GITHUB_STEP_SUMMARY`). Set to `false` to disable. |
+
+### Outputs
+
+| Output | Description |
+|---|---|
+| `report` | Full security report as a JSON string. |
+| `summary` | Markdown summary of findings. Set when `markdown: true` or `post-comment` is enabled. |
+| `sarif` | SARIF 2.1.0 report as a JSON string. Only set when `sarif-to-file` is specified. |
+| `has-findings` | `true` if any security findings were identified, `false` otherwise. |
+| `has-critical` | `true` if any CRITICAL severity findings were identified. |
+| `has-high` | `true` if any HIGH or CRITICAL severity findings were identified. |
+
+### Examples
+
+#### Basic — annotations and step summary
+
+```yaml
+on: [pull_request]
+
+jobs:
+  lockscan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Diff dependencies
+        id: lockdelta
+        uses: lachaib/lockdelta@v0.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: lachaib/lockscan@v0.1.0
+        with:
+          lockdelta-output: ${{ steps.lockdelta.outputs.diff }}
+```
+
+#### Fail on high-severity findings
+
+```yaml
+      - uses: lachaib/lockscan@v0.1.0
+        with:
+          lockdelta-output: ${{ steps.lockdelta.outputs.diff }}
+          fail-on: high
+```
+
+#### SARIF upload to GitHub Code Scanning
+
+```yaml
+      - uses: lachaib/lockscan@v0.1.0
+        id: lockscan
+        with:
+          lockdelta-output: ${{ steps.lockdelta.outputs.diff }}
+          sarif-to-file: lockscan.sarif
+
+      - uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: lockscan.sarif
+```
+
+#### PR comment with automatic resolution message
+
+```yaml
+    permissions:
+      contents: read
+      pull-requests: write
+    ...
+
+      - uses: lachaib/lockscan@v0.1.0
+        with:
+          lockdelta-output: ${{ steps.lockdelta.outputs.diff }}
+          post-comment: if-findings
+          fail-on: any
+```
+
+#### Multi-platform Python project
+
+```yaml
+      - uses: lachaib/lockscan@v0.1.0
+        with:
+          lockdelta-output: ${{ steps.lockdelta.outputs.diff }}
+          platform: |
+            linux/x86_64/3.12
+            macos/arm64/3.12
+            linux/arm64/3.12
+```
 
 ---
 

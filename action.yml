@@ -10,7 +10,7 @@ inputs:
   lockdelta-output:
     description: >
       The lockdelta JSON diff report. Accepts a raw JSON string (e.g. from
-      ${{ steps.lockdelta.outputs.diff }}) or a file path written by lockdelta's
+      steps.lockdelta.outputs.diff) or a file path written by lockdelta's
       json-to-file option.
     required: true
 
@@ -23,8 +23,8 @@ inputs:
 
   platform:
     description: >
-      Target platform(s). Format: os-arch[-pyver] (e.g. linux-x86_64-3.12,
-      macos-arm64). Separate multiple platforms with commas or newlines.
+      Target platform(s). Format: os/arch[/pyver] (e.g. linux/x86_64/3.12,
+      macos/arm64). Separate multiple platforms with commas or newlines.
       Defaults to the runner's host platform.
     required: false
 
