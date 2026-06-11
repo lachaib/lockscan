@@ -37,9 +37,19 @@ export async function postOrUpdateComment(
 
   const existingId = await findExistingCommentId(octokit, owner, repoName, issueNumber);
   if (existingId != null) {
-    await octokit.rest.issues.updateComment({ owner, repo: repoName, comment_id: existingId, body });
+    await octokit.rest.issues.updateComment({
+      owner,
+      repo: repoName,
+      comment_id: existingId,
+      body,
+    });
   } else {
-    await octokit.rest.issues.createComment({ owner, repo: repoName, issue_number: issueNumber, body });
+    await octokit.rest.issues.createComment({
+      owner,
+      repo: repoName,
+      issue_number: issueNumber,
+      body,
+    });
   }
 }
 

@@ -12,12 +12,13 @@ export function scanPatterns(files: FileMap, patterns: Pattern[]): SecurityFindi
   for (const [filename, content] of files) {
     for (const { regex, label } of patterns) {
       const g = new RegExp(regex.source, `gm${regex.flags.replace(/[gm]/g, '')}`);
-      let match: RegExpExecArray | null;
-      while ((match = g.exec(content)) !== null) {
+      let match = g.exec(content);
+      while (match !== null) {
         const lineNum = content.slice(0, match.index).split('\n').length;
         findings.push({ file: filename, line: lineNum, label });
         // avoid infinite loop on zero-length matches
         if (match.index === g.lastIndex) g.lastIndex++;
+        match = g.exec(content);
       }
     }
   }

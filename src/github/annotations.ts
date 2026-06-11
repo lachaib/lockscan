@@ -1,6 +1,6 @@
-import * as core from '@actions/core';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import * as core from '@actions/core';
 import type { SecurityReport } from '../types.js';
 import { annotationLevel, packageMaxSeverity } from './severity.js';
 

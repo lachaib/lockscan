@@ -49,9 +49,11 @@ const DANGEROUS_NATIVE_SYMBOLS = [
 const SYMBOL_SET = new Set<string>(DANGEROUS_NATIVE_SYMBOLS);
 
 const SUSPICIOUS_STRING_PATTERNS: RegExp[] = [
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
   /https?:\/\/[^\s"'<>\x00]{10,}/,
   /\b(?:\d{1,3}\.){3}\d{1,3}\b/,
   /\/etc\/(?:passwd|shadow|hosts|crontab|sudoers)/,
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
   /\/tmp\/[^\s\x00]{3,}/,
   /[A-Za-z0-9+/]{48,}={0,2}/,
 ];

@@ -94,7 +94,9 @@ export function computeJsrMetadataDelta(
   newMeta: NpmVersion,
 ): { homepageChanged: boolean; licenseChanged: boolean } {
   const lic = (m: NpmVersion) =>
-    typeof m.license === 'string' ? m.license : (m.license as { type?: string } | undefined)?.type ?? '';
+    typeof m.license === 'string'
+      ? m.license
+      : ((m.license as { type?: string } | undefined)?.type ?? '');
   return {
     homepageChanged: (oldMeta.homepage ?? '') !== (newMeta.homepage ?? ''),
     licenseChanged: lic(oldMeta) !== lic(newMeta),

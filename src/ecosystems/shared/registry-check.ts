@@ -24,7 +24,11 @@ function parseVersion(version: string): [number, number, number] {
   return [a ?? 0, b ?? 0, c ?? 0];
 }
 
-function confusionHeuristics(version: string, changeType: string, reg: Pick<PackageChange, 'old_registry_url' | 'new_registry_url'>): string[] {
+function confusionHeuristics(
+  version: string,
+  changeType: string,
+  reg: Pick<PackageChange, 'old_registry_url' | 'new_registry_url'>,
+): string[] {
   const reasons: string[] = [];
   const [major, minor, patch] = parseVersion(version);
 
@@ -60,7 +64,10 @@ function confusionHeuristics(version: string, changeType: string, reg: Pick<Pack
 }
 
 export function checkRegistry(
-  change: Pick<PackageChange, 'name' | 'change_type' | 'new_version' | 'old_registry_url' | 'new_registry_url'>,
+  change: Pick<
+    PackageChange,
+    'name' | 'change_type' | 'new_version' | 'old_registry_url' | 'new_registry_url'
+  >,
 ): RegistryCheck | undefined {
   const { old_registry_url, new_registry_url, new_version } = change;
 

@@ -22251,6 +22251,9 @@ var require_adm_zip = __commonJS({
   }
 });
 
+// src/action.ts
+var import_node_fs8 = require("fs");
+
 // node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/command.js
 var os = __toESM(require("os"), 1);
 
@@ -26492,9 +26495,6 @@ function getOctokit(token, options, ...additionalPlugins) {
   return new GitHubWithPlugins(getOctokitOptions(token, options));
 }
 
-// src/action.ts
-var import_node_fs8 = require("fs");
-
 // src/github/annotations.ts
 var import_node_fs = require("fs");
 var import_node_path = require("path");
@@ -26849,9 +26849,19 @@ async function postOrUpdateComment(markdown, prNumber, repo, token) {
 ${markdown}`;
   const existingId = await findExistingCommentId(octokit, owner, repoName, issueNumber);
   if (existingId != null) {
-    await octokit.rest.issues.updateComment({ owner, repo: repoName, comment_id: existingId, body });
+    await octokit.rest.issues.updateComment({
+      owner,
+      repo: repoName,
+      comment_id: existingId,
+      body
+    });
   } else {
-    await octokit.rest.issues.createComment({ owner, repo: repoName, issue_number: issueNumber, body });
+    await octokit.rest.issues.createComment({
+      owner,
+      repo: repoName,
+      issue_number: issueNumber,
+      body
+    });
   }
 }
 async function resolvedComment(prNumber, repo, token) {
@@ -30194,6 +30204,115 @@ async function walkDir(baseDir, currentDir, extensions, files) {
   }
 }
 
+// src/utils/http.ts
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}: ${url}`);
+  return res.json();
+}
+async function downloadBuffer(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}: ${url}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+// src/ecosystems/javascript/npm.ts
+async function fetchNpmVersion(name, version) {
+  const encoded = encodeNpmName(name);
+  return fetchJson(`https://registry.npmjs.org/${encoded}/${version}`);
+}
+async function fetchNpmPackage(name) {
+  const encoded = encodeNpmName(name);
+  const res = await fetch(`https://registry.npmjs.org/${encoded}`, {
+    headers: { Accept: "application/vnd.npm.install-v1+json" }
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}: registry.npmjs.org/${encoded}`);
+  return res.json();
+}
+function encodeNpmName(name) {
+  return name.startsWith("@") ? `@${encodeURIComponent(name.slice(1))}` : name;
+}
+function extractRepoUrl(meta) {
+  if (!meta.repository) return void 0;
+  return typeof meta.repository === "string" ? meta.repository : meta.repository.url;
+}
+function getArtifactInfo(meta) {
+  const filename = meta.dist.tarball.split("/").pop() ?? `${meta.name}-${meta.version}.tgz`;
+  return { filename, url: meta.dist.tarball, sha256: meta.dist.shasum };
+}
+async function downloadNpmTarball(url) {
+  return downloadBuffer(url);
+}
+async function extractRegistryInfo(meta) {
+  const authorName = typeof meta.author === "string" ? meta.author : meta.author?.name;
+  const authorEmail = typeof meta.author === "object" ? meta.author?.email : void 0;
+  const license = typeof meta.license === "string" ? meta.license : meta.license?.type;
+  let firstUpload;
+  let ageDays;
+  let numReleases;
+  let versionUpload;
+  let versionAgeDays;
+  try {
+    const pkg = await fetchNpmPackage(meta.name);
+    if (pkg.time) {
+      const versionTimes = Object.entries(pkg.time).filter(([k2]) => !["created", "modified"].includes(k2)).map(([, v2]) => v2).sort();
+      numReleases = versionTimes.length;
+      firstUpload = versionTimes[0];
+      if (firstUpload) {
+        ageDays = Math.floor((Date.now() - new Date(firstUpload).getTime()) / 864e5);
+      }
+      versionUpload = pkg.time[meta.version];
+      if (versionUpload) {
+        versionAgeDays = Math.floor((Date.now() - new Date(versionUpload).getTime()) / 864e5);
+      }
+    }
+  } catch {
+  }
+  return {
+    summary: meta.description,
+    author: authorName,
+    authorEmail,
+    homepage: meta.homepage,
+    license,
+    numReleases,
+    firstUpload,
+    ageDays,
+    versionUpload,
+    versionAgeDays,
+    latestVersion: meta.version,
+    requiresDist: [
+      ...Object.keys(meta.dependencies ?? {}),
+      ...Object.keys(meta.devDependencies ?? {}).map((k2) => `${k2} (dev)`)
+    ]
+  };
+}
+function licenseString(m2) {
+  if (!m2.license) return "";
+  return typeof m2.license === "string" ? m2.license : m2.license.type;
+}
+function computeMetadataDelta(oldMeta, newMeta) {
+  const getEmail = (m2) => typeof m2.author === "object" ? m2.author?.email ?? "" : "";
+  const oldDeps = /* @__PURE__ */ new Set([
+    ...Object.keys(oldMeta.dependencies ?? {}),
+    ...Object.keys(oldMeta.devDependencies ?? {}).map((k2) => `${k2} (dev)`)
+  ]);
+  const newDeps = /* @__PURE__ */ new Set([
+    ...Object.keys(newMeta.dependencies ?? {}),
+    ...Object.keys(newMeta.devDependencies ?? {}).map((k2) => `${k2} (dev)`)
+  ]);
+  const oldPublisher = oldMeta._npmUser?.name ?? oldMeta._npmUser?.email;
+  const newPublisher = newMeta._npmUser?.name ?? newMeta._npmUser?.email;
+  const publisherChanged = oldPublisher !== void 0 && newPublisher !== void 0 && oldPublisher !== newPublisher ? true : void 0;
+  return {
+    authorChanged: getEmail(oldMeta) !== getEmail(newMeta),
+    homepageChanged: (oldMeta.homepage ?? "") !== (newMeta.homepage ?? ""),
+    depsAdded: [...newDeps].filter((d) => !oldDeps.has(d)),
+    depsRemoved: [...oldDeps].filter((d) => !newDeps.has(d)),
+    licenseChanged: licenseString(oldMeta) !== licenseString(newMeta),
+    ...publisherChanged !== void 0 && { publisherChanged }
+  };
+}
+
 // node_modules/.pnpm/diff@9.0.0/node_modules/diff/libesm/diff/base.js
 var Diff = class {
   diff(oldStr, newStr, options = {}) {
@@ -30935,11 +31054,12 @@ function scanPatterns(files, patterns) {
   for (const [filename, content] of files) {
     for (const { regex, label } of patterns) {
       const g2 = new RegExp(regex.source, `gm${regex.flags.replace(/[gm]/g, "")}`);
-      let match;
-      while ((match = g2.exec(content)) !== null) {
+      let match = g2.exec(content);
+      while (match !== null) {
         const lineNum = content.slice(0, match.index).split("\n").length;
         findings.push({ file: filename, line: lineNum, label });
         if (match.index === g2.lastIndex) g2.lastIndex++;
+        match = g2.exec(content);
       }
     }
   }
@@ -30948,115 +31068,6 @@ function scanPatterns(files, patterns) {
 function findingsDelta(oldFindings, newFindings) {
   const oldSet = new Set(oldFindings.map((f2) => `${f2.file}\0${f2.label}`));
   return newFindings.filter((f2) => !oldSet.has(`${f2.file}\0${f2.label}`));
-}
-
-// src/utils/http.ts
-async function fetchJson(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}: ${url}`);
-  return res.json();
-}
-async function downloadBuffer(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}: ${url}`);
-  return Buffer.from(await res.arrayBuffer());
-}
-
-// src/ecosystems/javascript/npm.ts
-async function fetchNpmVersion(name, version) {
-  const encoded = encodeNpmName(name);
-  return fetchJson(`https://registry.npmjs.org/${encoded}/${version}`);
-}
-async function fetchNpmPackage(name) {
-  const encoded = encodeNpmName(name);
-  const res = await fetch(`https://registry.npmjs.org/${encoded}`, {
-    headers: { Accept: "application/vnd.npm.install-v1+json" }
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}: registry.npmjs.org/${encoded}`);
-  return res.json();
-}
-function encodeNpmName(name) {
-  return name.startsWith("@") ? `@${encodeURIComponent(name.slice(1))}` : name;
-}
-function extractRepoUrl(meta) {
-  if (!meta.repository) return void 0;
-  return typeof meta.repository === "string" ? meta.repository : meta.repository.url;
-}
-function getArtifactInfo(meta) {
-  const filename = meta.dist.tarball.split("/").pop() ?? `${meta.name}-${meta.version}.tgz`;
-  return { filename, url: meta.dist.tarball, sha256: meta.dist.shasum };
-}
-async function downloadNpmTarball(url) {
-  return downloadBuffer(url);
-}
-async function extractRegistryInfo(meta) {
-  const authorName = typeof meta.author === "string" ? meta.author : meta.author?.name;
-  const authorEmail = typeof meta.author === "object" ? meta.author?.email : void 0;
-  const license = typeof meta.license === "string" ? meta.license : meta.license?.type;
-  let firstUpload;
-  let ageDays;
-  let numReleases;
-  let versionUpload;
-  let versionAgeDays;
-  try {
-    const pkg = await fetchNpmPackage(meta.name);
-    if (pkg.time) {
-      const versionTimes = Object.entries(pkg.time).filter(([k2]) => !["created", "modified"].includes(k2)).map(([, v2]) => v2).sort();
-      numReleases = versionTimes.length;
-      firstUpload = versionTimes[0];
-      if (firstUpload) {
-        ageDays = Math.floor((Date.now() - new Date(firstUpload).getTime()) / 864e5);
-      }
-      versionUpload = pkg.time[meta.version];
-      if (versionUpload) {
-        versionAgeDays = Math.floor((Date.now() - new Date(versionUpload).getTime()) / 864e5);
-      }
-    }
-  } catch {
-  }
-  return {
-    summary: meta.description,
-    author: authorName,
-    authorEmail,
-    homepage: meta.homepage,
-    license,
-    numReleases,
-    firstUpload,
-    ageDays,
-    versionUpload,
-    versionAgeDays,
-    latestVersion: meta.version,
-    requiresDist: [
-      ...Object.keys(meta.dependencies ?? {}),
-      ...Object.keys(meta.devDependencies ?? {}).map((k2) => `${k2} (dev)`)
-    ]
-  };
-}
-function licenseString(m2) {
-  if (!m2.license) return "";
-  return typeof m2.license === "string" ? m2.license : m2.license.type;
-}
-function computeMetadataDelta(oldMeta, newMeta) {
-  const getEmail = (m2) => typeof m2.author === "object" ? m2.author?.email ?? "" : "";
-  const oldDeps = /* @__PURE__ */ new Set([
-    ...Object.keys(oldMeta.dependencies ?? {}),
-    ...Object.keys(oldMeta.devDependencies ?? {}).map((k2) => `${k2} (dev)`)
-  ]);
-  const newDeps = /* @__PURE__ */ new Set([
-    ...Object.keys(newMeta.dependencies ?? {}),
-    ...Object.keys(newMeta.devDependencies ?? {}).map((k2) => `${k2} (dev)`)
-  ]);
-  const oldPublisher = oldMeta._npmUser?.name ?? oldMeta._npmUser?.email;
-  const newPublisher = newMeta._npmUser?.name ?? newMeta._npmUser?.email;
-  const publisherChanged = oldPublisher !== void 0 && newPublisher !== void 0 && oldPublisher !== newPublisher ? true : void 0;
-  return {
-    authorChanged: getEmail(oldMeta) !== getEmail(newMeta),
-    homepageChanged: (oldMeta.homepage ?? "") !== (newMeta.homepage ?? ""),
-    depsAdded: [...newDeps].filter((d) => !oldDeps.has(d)),
-    depsRemoved: [...oldDeps].filter((d) => !newDeps.has(d)),
-    licenseChanged: licenseString(oldMeta) !== licenseString(newMeta),
-    ...publisherChanged !== void 0 && { publisherChanged }
-  };
 }
 
 // src/ecosystems/deno/jsr.ts
@@ -31206,9 +31217,25 @@ var DenoAnalyzer = class {
     };
     const registryCheck = checkRegistry(change);
     if (name.startsWith("jsr:")) {
-      return this.analyzeJsr(base, name.slice(4), change_type, old_version, new_version, options, registryCheck);
+      return this.analyzeJsr(
+        base,
+        name.slice(4),
+        change_type,
+        old_version,
+        new_version,
+        options,
+        registryCheck
+      );
     }
-    return this.analyzeNpm(base, name, change_type, old_version, new_version, options, registryCheck);
+    return this.analyzeNpm(
+      base,
+      name,
+      change_type,
+      old_version,
+      new_version,
+      options,
+      registryCheck
+    );
   }
   // ─── npm: packages ───────────────────────────────────────────────────────────
   // Treated identically to the JS ecosystem: same npm registry, same tarball
@@ -31217,10 +31244,19 @@ var DenoAnalyzer = class {
   async analyzeNpm(base, name, changeType, oldVersion, newVersion, options, registryCheck) {
     const safeName = name.replace(/\//g, "__");
     const download = (version, slot) => (url) => downloadNpmTarball(url).then(
-      (data) => extractTarball(data, (0, import_node_path12.join)(options.tmpDir, `deno_npm_${safeName}_${version}_${slot}`), NPM_EXTENSIONS)
+      (data) => extractTarball(
+        data,
+        (0, import_node_path12.join)(options.tmpDir, `deno_npm_${safeName}_${version}_${slot}`),
+        NPM_EXTENSIONS
+      )
     );
     if (changeType === "removed") {
-      return { ...base, oldVersion: oldVersion ?? null, newVersion: null, ...registryCheck && { registryCheck } };
+      return {
+        ...base,
+        oldVersion: oldVersion ?? null,
+        newVersion: null,
+        ...registryCheck && { registryCheck }
+      };
     }
     if (changeType === "added") {
       const newMeta2 = await fetchNpmVersion(name, newVersion);
@@ -31237,9 +31273,18 @@ var DenoAnalyzer = class {
         ...base,
         oldVersion: null,
         newVersion,
-        verification: { platforms: options.platforms, oldArtifacts: [], newArtifacts: [newArtifact2] },
+        verification: {
+          platforms: options.platforms,
+          oldArtifacts: [],
+          newArtifacts: [newArtifact2]
+        },
         registryInfo,
-        securityFindings: { old: [], new: newFindings2, delta: newFindings2, platformDivergence: false },
+        securityFindings: {
+          old: [],
+          new: newFindings2,
+          delta: newFindings2,
+          platformDivergence: false
+        },
         ...newHooks.length > 0 && { installHooks: newHooks.map((h) => ({ ...h, isNew: true })) },
         ...repoCheck2 && { repoCheck: repoCheck2 },
         ...registryCheck && { registryCheck }
@@ -31265,7 +31310,11 @@ var DenoAnalyzer = class {
       ...base,
       oldVersion,
       newVersion,
-      verification: { platforms: options.platforms, oldArtifacts: [oldArtifact], newArtifacts: [newArtifact] },
+      verification: {
+        platforms: options.platforms,
+        oldArtifacts: [oldArtifact],
+        newArtifacts: [newArtifact]
+      },
       metadataDelta,
       codeDelta: diffFiles(oldFiles, newFiles),
       securityFindings: {
@@ -31290,16 +31339,29 @@ var DenoAnalyzer = class {
       const artifact = getArtifactInfo(meta);
       const data = await downloadNpmTarball(artifact.url);
       return {
-        files: await extractTarball(data, (0, import_node_path12.join)(options.tmpDir, `deno_jsr_${safeName}_${version}_${slot}`), JSR_EXTENSIONS),
+        files: await extractTarball(
+          data,
+          (0, import_node_path12.join)(options.tmpDir, `deno_jsr_${safeName}_${version}_${slot}`),
+          JSR_EXTENSIONS
+        ),
         meta,
         artifact
       };
     };
     if (changeType === "removed") {
-      return { ...base, oldVersion: oldVersion ?? null, newVersion: null, ...registryCheck && { registryCheck } };
+      return {
+        ...base,
+        oldVersion: oldVersion ?? null,
+        newVersion: null,
+        ...registryCheck && { registryCheck }
+      };
     }
     if (changeType === "added") {
-      const { files: newFiles2, meta: newMeta2, artifact: newArtifact2 } = await download(newVersion, "new")();
+      const {
+        files: newFiles2,
+        meta: newMeta2,
+        artifact: newArtifact2
+      } = await download(newVersion, "new")();
       const [repoUrl2, registryInfo] = await Promise.all([
         resolveJsrRepoUrl(jsrName, newMeta2),
         extractJsrRegistryInfo(jsrName, newMeta2)
@@ -31312,9 +31374,18 @@ var DenoAnalyzer = class {
         ...base,
         oldVersion: null,
         newVersion,
-        verification: { platforms: options.platforms, oldArtifacts: [], newArtifacts: [newArtifact2] },
+        verification: {
+          platforms: options.platforms,
+          oldArtifacts: [],
+          newArtifacts: [newArtifact2]
+        },
         registryInfo,
-        securityFindings: { old: [], new: newFindings2, delta: newFindings2, platformDivergence: false },
+        securityFindings: {
+          old: [],
+          new: newFindings2,
+          delta: newFindings2,
+          platformDivergence: false
+        },
         ...repoCheck2 && { repoCheck: repoCheck2 },
         ...registryCheck && { registryCheck }
       };
@@ -31326,7 +31397,12 @@ var DenoAnalyzer = class {
     const { files: newFiles, meta: newMeta, artifact: newArtifact } = newResult;
     const { files: oldFiles, meta: oldMeta, artifact: oldArtifact } = oldResult;
     const repoUrl = await resolveJsrRepoUrl(jsrName, newMeta);
-    const repoCheck = await checkRepoRelease({ repoUrl, packageName: jsrName, oldVersion, newVersion });
+    const repoCheck = await checkRepoRelease({
+      repoUrl,
+      packageName: jsrName,
+      oldVersion,
+      newVersion
+    });
     const newFindings = scanPatterns(newFiles, DANGEROUS_PATTERNS2);
     const oldFindings = scanPatterns(oldFiles, DANGEROUS_PATTERNS2);
     const jsrDelta = computeJsrMetadataDelta(oldMeta, newMeta);
@@ -31334,7 +31410,11 @@ var DenoAnalyzer = class {
       ...base,
       oldVersion,
       newVersion,
-      verification: { platforms: options.platforms, oldArtifacts: [oldArtifact], newArtifacts: [newArtifact] },
+      verification: {
+        platforms: options.platforms,
+        oldArtifacts: [oldArtifact],
+        newArtifacts: [newArtifact]
+      },
       metadataDelta: {
         authorChanged: false,
         depsAdded: [],
@@ -31521,9 +31601,11 @@ var DANGEROUS_NATIVE_SYMBOLS = [
 ];
 var SYMBOL_SET = new Set(DANGEROUS_NATIVE_SYMBOLS);
 var SUSPICIOUS_STRING_PATTERNS = [
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
   /https?:\/\/[^\s"'<>\x00]{10,}/,
   /\b(?:\d{1,3}\.){3}\d{1,3}\b/,
   /\/etc\/(?:passwd|shadow|hosts|crontab|sudoers)/,
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
   /\/tmp\/[^\s\x00]{3,}/,
   /[A-Za-z0-9+/]{48,}={0,2}/
 ];
@@ -32401,21 +32483,26 @@ async function analyze2(report, options = {}) {
     }
     const postCommentEnabled = postCommentMode !== "false";
     if (postCommentEnabled && !prNumber) {
-      notice("post-comment is set but this run is not associated with a pull request \u2014 skipping comment");
+      notice(
+        "post-comment is set but this run is not associated with a pull request \u2014 skipping comment"
+      );
     } else if (postCommentEnabled && prNumber) {
       const shouldPost = postCommentMode === "true" || postCommentMode === "if-findings" && hasFindings;
       const shouldResolve = postCommentMode === "if-findings" && !hasFindings;
       if (shouldPost) {
-        await postOrUpdateComment(markdown || formatMarkdown(report), String(prNumber), repo, githubToken);
+        await postOrUpdateComment(
+          markdown || formatMarkdown(report),
+          String(prNumber),
+          repo,
+          githubToken
+        );
       } else if (shouldResolve) {
         await resolvedComment(String(prNumber), repo, githubToken);
       }
     }
     const failOn = getInput("fail-on") || "never";
     if (shouldFail(failOn, maxSev)) {
-      setFailed(
-        `lockscan: findings at severity '${maxSev}' detected (fail-on: ${failOn})`
-      );
+      setFailed(`lockscan: findings at severity '${maxSev}' detected (fail-on: ${failOn})`);
       return;
     }
     const total = report.summary.analyzed;

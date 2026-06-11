@@ -1,6 +1,6 @@
+import { readFileSync, writeFileSync } from 'node:fs';
 import * as core from '@actions/core';
 import { context } from '@actions/github';
-import { readFileSync, writeFileSync } from 'node:fs';
 import { emitAnnotations } from './github/annotations.js';
 import { postOrUpdateComment, resolvedComment } from './github/comment.js';
 import { formatMarkdown } from './github/markdown.js';
@@ -25,12 +25,19 @@ import { parsePlatform } from './platforms.js';
     // --- Parse options ---
     const platformInput = core.getInput('platform');
     const platforms = platformInput
-      ? platformInput.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean).map(parsePlatform)
+      ? platformInput
+          .split(/[\n,]+/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map(parsePlatform)
       : undefined;
 
     const onlyInput = core.getInput('only');
     const onlyTypes = onlyInput
-      ? onlyInput.split(',').map((s) => s.trim()).filter(Boolean)
+      ? onlyInput
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
       : undefined;
 
     const githubToken = core.getInput('github-token');
@@ -84,14 +91,21 @@ import { parsePlatform } from './platforms.js';
     // --- PR comment ---
     const postCommentEnabled = postCommentMode !== 'false';
     if (postCommentEnabled && !prNumber) {
-      core.notice('post-comment is set but this run is not associated with a pull request — skipping comment');
+      core.notice(
+        'post-comment is set but this run is not associated with a pull request — skipping comment',
+      );
     } else if (postCommentEnabled && prNumber) {
       const shouldPost =
         postCommentMode === 'true' || (postCommentMode === 'if-findings' && hasFindings);
       const shouldResolve = postCommentMode === 'if-findings' && !hasFindings;
 
       if (shouldPost) {
-        await postOrUpdateComment(markdown || formatMarkdown(report), String(prNumber), repo, githubToken);
+        await postOrUpdateComment(
+          markdown || formatMarkdown(report),
+          String(prNumber),
+          repo,
+          githubToken,
+        );
       } else if (shouldResolve) {
         await resolvedComment(String(prNumber), repo, githubToken);
       }
@@ -100,9 +114,7 @@ import { parsePlatform } from './platforms.js';
     // --- fail-on ---
     const failOn = core.getInput('fail-on') || 'never';
     if (shouldFail(failOn, maxSev)) {
-      core.setFailed(
-        `lockscan: findings at severity '${maxSev}' detected (fail-on: ${failOn})`,
-      );
+      core.setFailed(`lockscan: findings at severity '${maxSev}' detected (fail-on: ${failOn})`);
       return;
     }
 

@@ -3,11 +3,6 @@ import type { PackageChange } from 'lockdelta';
 import type { PackageAnalysis } from '../../types.js';
 import { extractTarball } from '../../utils/extract.js';
 import type { AnalysisOptions, EcosystemAnalyzer } from '../base.js';
-import { diffFiles } from '../shared/diff.js';
-import { annotateHooks, detectNpmHooks } from '../shared/install-hooks.js';
-import { checkRegistry } from '../shared/registry-check.js';
-import { checkRepoRelease } from '../shared/repo-check.js';
-import { findingsDelta, scanPatterns } from '../shared/scan.js';
 import {
   computeMetadataDelta,
   downloadNpmTarball,
@@ -16,6 +11,11 @@ import {
   fetchNpmVersion,
   getArtifactInfo,
 } from '../javascript/npm.js';
+import { diffFiles } from '../shared/diff.js';
+import { annotateHooks, detectNpmHooks } from '../shared/install-hooks.js';
+import { checkRegistry } from '../shared/registry-check.js';
+import { checkRepoRelease } from '../shared/repo-check.js';
+import { findingsDelta, scanPatterns } from '../shared/scan.js';
 import {
   computeJsrMetadataDelta,
   extractJsrRegistryInfo,
@@ -40,9 +40,25 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
     const registryCheck = checkRegistry(change);
 
     if (name.startsWith('jsr:')) {
-      return this.analyzeJsr(base, name.slice(4), change_type, old_version, new_version, options, registryCheck);
+      return this.analyzeJsr(
+        base,
+        name.slice(4),
+        change_type,
+        old_version,
+        new_version,
+        options,
+        registryCheck,
+      );
     }
-    return this.analyzeNpm(base, name, change_type, old_version, new_version, options, registryCheck);
+    return this.analyzeNpm(
+      base,
+      name,
+      change_type,
+      old_version,
+      new_version,
+      options,
+      registryCheck,
+    );
   }
 
   // ─── npm: packages ───────────────────────────────────────────────────────────
@@ -51,7 +67,13 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
   // APIs so packages that bridge Node.js and Deno are fully covered.
 
   private async analyzeNpm(
-    base: { name: string; changeType: PackageChange['change_type']; isDirect: boolean; isDev: boolean; ecosystem: 'deno' },
+    base: {
+      name: string;
+      changeType: PackageChange['change_type'];
+      isDirect: boolean;
+      isDev: boolean;
+      ecosystem: 'deno';
+    },
     name: string,
     changeType: PackageChange['change_type'],
     oldVersion: string | null | undefined,
@@ -63,11 +85,20 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
 
     const download = (version: string, slot: string) => (url: string) =>
       downloadNpmTarball(url).then((data) =>
-        extractTarball(data, join(options.tmpDir, `deno_npm_${safeName}_${version}_${slot}`), NPM_EXTENSIONS),
+        extractTarball(
+          data,
+          join(options.tmpDir, `deno_npm_${safeName}_${version}_${slot}`),
+          NPM_EXTENSIONS,
+        ),
       );
 
     if (changeType === 'removed') {
-      return { ...base, oldVersion: oldVersion ?? null, newVersion: null, ...(registryCheck && { registryCheck }) };
+      return {
+        ...base,
+        oldVersion: oldVersion ?? null,
+        newVersion: null,
+        ...(registryCheck && { registryCheck }),
+      };
     }
 
     if (changeType === 'added') {
@@ -88,9 +119,18 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
         ...base,
         oldVersion: null,
         newVersion: newVersion!,
-        verification: { platforms: options.platforms, oldArtifacts: [], newArtifacts: [newArtifact] },
+        verification: {
+          platforms: options.platforms,
+          oldArtifacts: [],
+          newArtifacts: [newArtifact],
+        },
         registryInfo,
-        securityFindings: { old: [], new: newFindings, delta: newFindings, platformDivergence: false },
+        securityFindings: {
+          old: [],
+          new: newFindings,
+          delta: newFindings,
+          platformDivergence: false,
+        },
         ...(newHooks.length > 0 && { installHooks: newHooks.map((h) => ({ ...h, isNew: true })) }),
         ...(repoCheck && { repoCheck }),
         ...(registryCheck && { registryCheck }),
@@ -121,7 +161,11 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
       ...base,
       oldVersion: oldVersion!,
       newVersion: newVersion!,
-      verification: { platforms: options.platforms, oldArtifacts: [oldArtifact], newArtifacts: [newArtifact] },
+      verification: {
+        platforms: options.platforms,
+        oldArtifacts: [oldArtifact],
+        newArtifacts: [newArtifact],
+      },
       metadataDelta,
       codeDelta: diffFiles(oldFiles, newFiles),
       securityFindings: {
@@ -142,7 +186,13 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
   // do not ship native binaries, so those checks are omitted.
 
   private async analyzeJsr(
-    base: { name: string; changeType: PackageChange['change_type']; isDirect: boolean; isDev: boolean; ecosystem: 'deno' },
+    base: {
+      name: string;
+      changeType: PackageChange['change_type'];
+      isDirect: boolean;
+      isDev: boolean;
+      ecosystem: 'deno';
+    },
     jsrName: string,
     changeType: PackageChange['change_type'],
     oldVersion: string | null | undefined,
@@ -157,18 +207,31 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
       const artifact = getArtifactInfo(meta);
       const data = await downloadNpmTarball(artifact.url);
       return {
-        files: await extractTarball(data, join(options.tmpDir, `deno_jsr_${safeName}_${version}_${slot}`), JSR_EXTENSIONS),
+        files: await extractTarball(
+          data,
+          join(options.tmpDir, `deno_jsr_${safeName}_${version}_${slot}`),
+          JSR_EXTENSIONS,
+        ),
         meta,
         artifact,
       };
     };
 
     if (changeType === 'removed') {
-      return { ...base, oldVersion: oldVersion ?? null, newVersion: null, ...(registryCheck && { registryCheck }) };
+      return {
+        ...base,
+        oldVersion: oldVersion ?? null,
+        newVersion: null,
+        ...(registryCheck && { registryCheck }),
+      };
     }
 
     if (changeType === 'added') {
-      const { files: newFiles, meta: newMeta, artifact: newArtifact } = await download(newVersion!, 'new')();
+      const {
+        files: newFiles,
+        meta: newMeta,
+        artifact: newArtifact,
+      } = await download(newVersion!, 'new')();
       const [repoUrl, registryInfo] = await Promise.all([
         resolveJsrRepoUrl(jsrName, newMeta),
         extractJsrRegistryInfo(jsrName, newMeta),
@@ -184,9 +247,18 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
         ...base,
         oldVersion: null,
         newVersion: newVersion!,
-        verification: { platforms: options.platforms, oldArtifacts: [], newArtifacts: [newArtifact] },
+        verification: {
+          platforms: options.platforms,
+          oldArtifacts: [],
+          newArtifacts: [newArtifact],
+        },
         registryInfo,
-        securityFindings: { old: [], new: newFindings, delta: newFindings, platformDivergence: false },
+        securityFindings: {
+          old: [],
+          new: newFindings,
+          delta: newFindings,
+          platformDivergence: false,
+        },
         ...(repoCheck && { repoCheck }),
         ...(registryCheck && { registryCheck }),
       };
@@ -201,7 +273,12 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
     const { files: oldFiles, meta: oldMeta, artifact: oldArtifact } = oldResult;
 
     const repoUrl = await resolveJsrRepoUrl(jsrName, newMeta);
-    const repoCheck = await checkRepoRelease({ repoUrl, packageName: jsrName, oldVersion, newVersion });
+    const repoCheck = await checkRepoRelease({
+      repoUrl,
+      packageName: jsrName,
+      oldVersion,
+      newVersion,
+    });
 
     const newFindings = scanPatterns(newFiles, DANGEROUS_PATTERNS);
     const oldFindings = scanPatterns(oldFiles, DANGEROUS_PATTERNS);
@@ -211,7 +288,11 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
       ...base,
       oldVersion: oldVersion!,
       newVersion: newVersion!,
-      verification: { platforms: options.platforms, oldArtifacts: [oldArtifact], newArtifacts: [newArtifact] },
+      verification: {
+        platforms: options.platforms,
+        oldArtifacts: [oldArtifact],
+        newArtifacts: [newArtifact],
+      },
       metadataDelta: {
         authorChanged: false,
         depsAdded: [],
@@ -229,5 +310,4 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
       ...(registryCheck && { registryCheck }),
     };
   }
-
 }
