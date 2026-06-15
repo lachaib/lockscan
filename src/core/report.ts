@@ -236,6 +236,8 @@ function formatPackage(pkg: PackageAnalysis, idx: number, total: number): string
       '\nSECURITY SCAN' +
         divergenceWarning +
         '\n' +
+        formatFindingsSummary(oldF, newF, delta) +
+        '\n' +
         formatFindings(oldF, 'old_hits') +
         '\n' +
         formatFindings(newF, 'new_hits') +
@@ -334,6 +336,43 @@ function formatBinaryFindings(findings: BinaryFinding[]): string {
   }
   if (findings.length > MAX_FINDINGS_SHOWN)
     lines.push(`    ...${findings.length - MAX_FINDINGS_SHOWN} more`);
+  return lines.join('\n');
+}
+
+function formatFindingsSummary(
+  oldF: SecurityFinding[],
+  newF: SecurityFinding[],
+  delta: SecurityFinding[],
+): string {
+  const oldCount = new Map<string, number>();
+  for (const { label } of oldF) oldCount.set(label, (oldCount.get(label) ?? 0) + 1);
+
+  const newCount = new Map<string, number>();
+  for (const { label } of newF) newCount.set(label, (newCount.get(label) ?? 0) + 1);
+
+  const deltaCount = new Map<string, number>();
+  for (const { label } of delta) deltaCount.set(label, (deltaCount.get(label) ?? 0) + 1);
+
+  const allLabels = new Set([...oldCount.keys(), ...newCount.keys()]);
+  if (allLabels.size === 0) return '  by pattern (old → new): none';
+
+  // Delta labels first (most new hits), then labels that only dropped
+  const sorted = [...allLabels].sort((a, b) => {
+    const dDiff = (deltaCount.get(b) ?? 0) - (deltaCount.get(a) ?? 0);
+    if (dDiff !== 0) return dDiff;
+    return (newCount.get(b) ?? 0) - (newCount.get(a) ?? 0);
+  });
+
+  const lines = ['  by pattern (old → new, net):'];
+  for (const label of sorted) {
+    const o = oldCount.get(label) ?? 0;
+    const n = newCount.get(label) ?? 0;
+    const net = n - o;
+    const netStr = net > 0 ? `+${net}` : `${net}`;
+    const d = deltaCount.get(label) ?? 0;
+    const deltaStr = d > 0 ? `  [${d} in delta]` : '';
+    lines.push(`    ${label}: ${o} → ${n}  (${netStr})${deltaStr}`);
+  }
   return lines.join('\n');
 }
 

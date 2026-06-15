@@ -26532,6 +26532,29 @@ var MODERATE_PATTERNS = /* @__PURE__ */ new Set([
   "deser:yaml.load",
   "deser:generic"
 ]);
+var PATTERN_FAMILIES = {
+  "dynamic-import": [
+    "exec:importlib",
+    "exec:__import__",
+    "exec:dynamic-require",
+    "exec:dynamic-load-path"
+  ],
+  eval: ["exec:eval", "exec:exec", "exec:compile", "exec:Function", "exec:vm"],
+  shell: [
+    "shell:os.system",
+    "shell:os.popen",
+    "shell:subprocess",
+    "shell:execSync",
+    "shell:spawnSync",
+    "shell:execFileSync",
+    "shell:require-child_process"
+  ],
+  deser: ["deser:pickle", "deser:marshal", "deser:yaml.load", "deser:generic"]
+};
+var LABEL_TO_FAMILY = /* @__PURE__ */ new Map();
+for (const members of Object.values(PATTERN_FAMILIES)) {
+  for (const label of members) LABEL_TO_FAMILY.set(label, members);
+}
 function patternSeverity(label) {
   if (CRITICAL_PATTERNS.has(label)) return "critical";
   if (HIGH_PATTERNS.has(label)) return "high";
@@ -26557,14 +26580,36 @@ function higher(a, b2) {
   if (!a) return b2;
   return SEVERITY_RANK[a] >= SEVERITY_RANK[b2] ? a : b2;
 }
+function countByLabel(findings) {
+  const m2 = /* @__PURE__ */ new Map();
+  for (const { label } of findings) m2.set(label, (m2.get(label) ?? 0) + 1);
+  return m2;
+}
+function effectivePatternSeverity(label, oldCount, newCount) {
+  const base = patternSeverity(label);
+  if (base === "critical") return base;
+  const family = LABEL_TO_FAMILY.get(label);
+  if (!family) return base;
+  const oldTotal = family.reduce((n, l) => n + (oldCount.get(l) ?? 0), 0);
+  const newTotal = family.reduce((n, l) => n + (newCount.get(l) ?? 0), 0);
+  const netIncrease = newTotal - oldTotal;
+  const threshold = Math.max(3, Math.ceil(oldTotal * 0.2));
+  if (netIncrease < threshold) return "low";
+  return base;
+}
 function packageMaxSeverity(pkg) {
   let s3 = null;
   for (const v2 of pkg.knownVulns ?? []) {
     const vs2 = osvSeverity(v2.severity);
     if (vs2) s3 = higher(s3, vs2);
   }
-  for (const f2 of pkg.securityFindings?.delta ?? []) {
-    s3 = higher(s3, patternSeverity(f2.label));
+  if (pkg.securityFindings?.delta.length) {
+    const { old: oldF, new: newF, delta } = pkg.securityFindings;
+    const oldCount = countByLabel(oldF);
+    const newCount = countByLabel(newF);
+    for (const f2 of delta) {
+      s3 = higher(s3, effectivePatternSeverity(f2.label, oldCount, newCount));
+    }
   }
   if ((pkg.binaryFindings?.delta.length ?? 0) > 0) s3 = higher(s3, "high");
   if (pkg.securityFindings?.platformDivergence) s3 = higher(s3, "high");
