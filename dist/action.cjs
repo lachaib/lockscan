@@ -32659,7 +32659,7 @@ Analyzing ${lf.path ?? "lockfile"} (${lf.ecosystem}): ${changes.length} change(s
 `
       );
       const osvResults = await queryOsv(
-        changes.filter((c) => c.new_version && c.change_type !== "removed").map((c) => ({ name: c.name, version: c.new_version, ecosystem: lf.ecosystem }))
+        changes.filter((c) => c.change_type !== "removed").map((c) => ({ name: c.name, version: c.new_version, ecosystem: lf.ecosystem }))
       );
       const packages = [];
       for (let i = 0; i < changes.length; i++) {
