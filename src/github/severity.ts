@@ -1,4 +1,4 @@
-import type { PackageAnalysis, SecurityReport } from '../types.js';
+import type { PackageAnalysis, SecurityFinding, SecurityReport } from '../types.js';
 
 export type Severity = 'critical' | 'high' | 'moderate' | 'low';
 
@@ -41,6 +41,34 @@ const MODERATE_PATTERNS = new Set([
   'deser:generic',
 ]);
 
+// Groups of labels that represent the same underlying capability. When the family's
+// net hit count doesn't grow, a new delta hit is a lateral refactor rather than new
+// attack surface and is downgraded to 'low'.
+const PATTERN_FAMILIES: Record<string, string[]> = {
+  'dynamic-import': [
+    'exec:importlib',
+    'exec:__import__',
+    'exec:dynamic-require',
+    'exec:dynamic-load-path',
+  ],
+  eval: ['exec:eval', 'exec:exec', 'exec:compile', 'exec:Function', 'exec:vm'],
+  shell: [
+    'shell:os.system',
+    'shell:os.popen',
+    'shell:subprocess',
+    'shell:execSync',
+    'shell:spawnSync',
+    'shell:execFileSync',
+    'shell:require-child_process',
+  ],
+  deser: ['deser:pickle', 'deser:marshal', 'deser:yaml.load', 'deser:generic'],
+};
+
+const LABEL_TO_FAMILY = new Map<string, string[]>();
+for (const members of Object.values(PATTERN_FAMILIES)) {
+  for (const label of members) LABEL_TO_FAMILY.set(label, members);
+}
+
 export function patternSeverity(label: string): Severity {
   if (CRITICAL_PATTERNS.has(label)) return 'critical';
   if (HIGH_PATTERNS.has(label)) return 'high';
@@ -69,6 +97,34 @@ export function higher(a: Severity | null, b: Severity): Severity {
   return SEVERITY_RANK[a] >= SEVERITY_RANK[b] ? a : b;
 }
 
+function countByLabel(findings: SecurityFinding[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const { label } of findings) m.set(label, (m.get(label) ?? 0) + 1);
+  return m;
+}
+
+function effectivePatternSeverity(
+  label: string,
+  oldCount: Map<string, number>,
+  newCount: Map<string, number>,
+): Severity {
+  const base = patternSeverity(label);
+  if (base === 'critical') return base;
+
+  const family = LABEL_TO_FAMILY.get(label);
+  if (!family) return base;
+
+  const oldTotal = family.reduce((n, l) => n + (oldCount.get(l) ?? 0), 0);
+  const newTotal = family.reduce((n, l) => n + (newCount.get(l) ?? 0), 0);
+
+  // Family net count grew only marginally — treat as lateral refactor, not new attack surface.
+  // Threshold: net increase must exceed 20% of the old count OR 3 absolute hits to escalate.
+  const netIncrease = newTotal - oldTotal;
+  const threshold = Math.max(3, Math.ceil(oldTotal * 0.2));
+  if (netIncrease < threshold) return 'low';
+  return base;
+}
+
 export function packageMaxSeverity(pkg: PackageAnalysis): Severity | null {
   let s: Severity | null = null;
 
@@ -76,8 +132,14 @@ export function packageMaxSeverity(pkg: PackageAnalysis): Severity | null {
     const vs = osvSeverity(v.severity);
     if (vs) s = higher(s, vs);
   }
-  for (const f of pkg.securityFindings?.delta ?? []) {
-    s = higher(s, patternSeverity(f.label));
+
+  if (pkg.securityFindings?.delta.length) {
+    const { old: oldF, new: newF, delta } = pkg.securityFindings;
+    const oldCount = countByLabel(oldF);
+    const newCount = countByLabel(newF);
+    for (const f of delta) {
+      s = higher(s, effectivePatternSeverity(f.label, oldCount, newCount));
+    }
   }
 
   if ((pkg.binaryFindings?.delta.length ?? 0) > 0) s = higher(s, 'high');
