@@ -30949,6 +30949,34 @@ function detectPythonWheelHooks(files) {
   }
   return hooks;
 }
+var COMPOSER_AUTO_SCRIPTS = /* @__PURE__ */ new Set([
+  "pre-install-cmd",
+  "post-install-cmd",
+  "pre-update-cmd",
+  "post-update-cmd",
+  "pre-autoload-dump",
+  "post-autoload-dump"
+]);
+function detectComposerHooks(files) {
+  const raw = files.get("composer.json");
+  if (!raw) return [];
+  let pkg;
+  try {
+    pkg = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  const scripts = pkg.scripts;
+  if (!scripts) return [];
+  const hooks = [];
+  for (const name of COMPOSER_AUTO_SCRIPTS) {
+    const entry = scripts[name];
+    if (!entry) continue;
+    const command = Array.isArray(entry) ? entry.join(" && ") : String(entry);
+    hooks.push({ type: "composer-script", name, command, isNew: false, changed: false });
+  }
+  return hooks;
+}
 function annotateHooks(oldHooks, newHooks) {
   const oldByName = new Map(oldHooks.map((h) => [h.name, h]));
   return newHooks.map((h) => {
@@ -30963,7 +30991,10 @@ var PUBLIC_REGISTRY_PREFIXES = [
   "https://pypi.org",
   "https://pypi.python.org",
   "https://files.pythonhosted.org",
-  "https://upload.pypi.org"
+  "https://upload.pypi.org",
+  // Packagist (PHP) distributes packages via GitHub zipballs
+  "https://api.github.com",
+  "https://codeload.github.com"
 ];
 function isPublic(url) {
   return url !== void 0 && PUBLIC_REGISTRY_PREFIXES.some((p2) => url.startsWith(p2));
@@ -31594,6 +31625,282 @@ var JavaScriptAnalyzer = class {
   }
 };
 
+// src/ecosystems/php/packagist.ts
+function getArtifactInfo2(meta) {
+  if (!meta.dist?.url) return void 0;
+  const url = meta.dist.url;
+  const filename = url.split("/").pop() ?? `${meta.name}-${meta.version}.zip`;
+  return {
+    filename,
+    url,
+    // Packagist provides SHA-1 shasum (same treatment as npm's shasum field)
+    sha256: meta.dist.shasum ?? ""
+  };
+}
+async function downloadArtifact(url) {
+  return downloadBuffer(url);
+}
+function extractRepoUrl2(meta) {
+  return meta.source?.url ?? void 0;
+}
+function extractRegistryInfo2(meta, allVersions) {
+  const author = meta.authors?.[0];
+  const license = meta.license?.join(", ");
+  const uploadTimes = Object.values(allVersions).map((v2) => v2.time).filter((t) => !!t).sort();
+  const firstUpload = uploadTimes[0];
+  const ageDays = firstUpload ? Math.floor((Date.now() - new Date(firstUpload).getTime()) / 864e5) : void 0;
+  const versionUpload = meta.time;
+  const versionAgeDays = versionUpload ? Math.floor((Date.now() - new Date(versionUpload).getTime()) / 864e5) : void 0;
+  const require2 = { ...meta.require, ...meta["require-dev"] };
+  const requiresDist = Object.entries(require2).filter(([k2]) => !k2.startsWith("php") && !k2.startsWith("ext-") && !k2.startsWith("lib-")).map(([k2, v2]) => `${k2}:${v2}`);
+  return {
+    summary: meta.description,
+    author: author?.name,
+    authorEmail: author?.email,
+    homepage: meta.homepage,
+    license,
+    numReleases: Object.keys(allVersions).length,
+    firstUpload,
+    ageDays,
+    versionUpload,
+    versionAgeDays,
+    requiresDist
+  };
+}
+function computeMetadataDelta2(oldMeta, newMeta) {
+  const oldAuthorEmail = oldMeta.authors?.[0]?.email ?? "";
+  const newAuthorEmail = newMeta.authors?.[0]?.email ?? "";
+  const deps = (meta) => new Set(
+    Object.keys({ ...meta.require, ...meta["require-dev"] }).filter(
+      (k2) => !k2.startsWith("php") && !k2.startsWith("ext-") && !k2.startsWith("lib-")
+    )
+  );
+  const oldDeps = deps(oldMeta);
+  const newDeps = deps(newMeta);
+  return {
+    authorChanged: oldAuthorEmail !== newAuthorEmail,
+    homepageChanged: (oldMeta.homepage ?? "") !== (newMeta.homepage ?? ""),
+    depsAdded: [...newDeps].filter((d) => !oldDeps.has(d)),
+    depsRemoved: [...oldDeps].filter((d) => !newDeps.has(d)),
+    licenseChanged: (oldMeta.license ?? []).sort().join(",") !== (newMeta.license ?? []).sort().join(",")
+  };
+}
+async function fetchPackagistWithVersions(name, version) {
+  const [vendor, pkg] = name.split("/");
+  if (!vendor || !pkg) throw new Error(`Invalid Composer package name: ${name}`);
+  const data = await fetchJson(
+    `https://packagist.org/packages/${vendor}/${pkg}.json`
+  );
+  const allVersions = data.package.versions;
+  const candidates = [version, version.startsWith("v") ? version.slice(1) : `v${version}`];
+  for (const v2 of candidates) {
+    if (allVersions[v2]) return { meta: allVersions[v2], allVersions };
+  }
+  const lower = version.toLowerCase();
+  for (const [k2, v2] of Object.entries(allVersions)) {
+    if (k2.toLowerCase() === lower || k2.toLowerCase() === `v${lower}`) {
+      return { meta: v2, allVersions };
+    }
+  }
+  throw new Error(`Version ${version} of ${name} not found on Packagist`);
+}
+
+// src/ecosystems/php/patterns.ts
+var DANGEROUS_PATTERNS3 = [
+  // Code execution
+  { regex: /\beval\s*\(/, label: "exec:eval" },
+  { regex: /\bcreate_function\s*\(/, label: "exec:create_function" },
+  { regex: /\bcall_user_func\s*\(/, label: "exec:call_user_func" },
+  { regex: /\bcall_user_func_array\s*\(/, label: "exec:call_user_func_array" },
+  { regex: /\bpreg_replace\s*\(\s*['"][^'"]*e['"]/, label: "exec:preg_replace-e-modifier" },
+  // Shell execution
+  { regex: /\bexec\s*\(/, label: "shell:exec" },
+  { regex: /\bshell_exec\s*\(/, label: "shell:shell_exec" },
+  { regex: /\bsystem\s*\(/, label: "shell:system" },
+  { regex: /\bpassthru\s*\(/, label: "shell:passthru" },
+  { regex: /\bpopen\s*\(/, label: "shell:popen" },
+  { regex: /\bproc_open\s*\(/, label: "shell:proc_open" },
+  { regex: /\bpcntl_exec\s*\(/, label: "shell:pcntl_exec" },
+  // Backtick shell operator
+  { regex: /`[^`]+`/, label: "shell:backtick" },
+  // Deserialization — unserialize() with untrusted data is a classic PHP RCE vector
+  { regex: /\bunserialize\s*\(/, label: "deser:unserialize" },
+  { regex: /\byaml_parse\s*\(/, label: "deser:yaml_parse" },
+  // Obfuscation
+  { regex: /\bbase64_decode\s*\(/, label: "obfusc:base64_decode" },
+  { regex: /\bstr_rot13\s*\(/, label: "obfusc:str_rot13" },
+  { regex: /\bgzinflate\s*\(/, label: "obfusc:gzinflate" },
+  { regex: /\bgzuncompress\s*\(/, label: "obfusc:gzuncompress" },
+  { regex: /\bhex2bin\s*\(/, label: "obfusc:hex2bin" },
+  { regex: /\\x[0-9a-fA-F]{2}/, label: "obfusc:hex-escape" },
+  // eval-then-decode compounds (commonly used to hide payloads)
+  {
+    regex: /eval\s*\(\s*(?:base64_decode|gzinflate|str_rot13|hex2bin)\s*\(/,
+    label: "obfusc:eval-decode"
+  },
+  // Network I/O
+  { regex: /\bfsockopen\s*\(/, label: "net:fsockopen" },
+  { regex: /\bstream_socket_client\s*\(/, label: "net:stream_socket_client" },
+  { regex: /\bcurl_exec\s*\(/, label: "net:curl_exec" },
+  // file_get_contents is dual-use; flag when called with a URL-like argument
+  { regex: /\bfile_get_contents\s*\(\s*['"]https?:/, label: "net:file_get_contents-url" },
+  // Filesystem writes / deletes
+  { regex: /\bfile_put_contents\s*\(/, label: "fs:file_put_contents" },
+  { regex: /\bfwrite\s*\(/, label: "fs:fwrite" },
+  { regex: /\bunlink\s*\(/, label: "fs:unlink" },
+  { regex: /\brmdir\s*\(/, label: "fs:rmdir" },
+  // Environment / process info access
+  { regex: /\bgetenv\s*\(/, label: "info:getenv" },
+  { regex: /\$_ENV\b/, label: "info:$_ENV" },
+  { regex: /\$_SERVER\b/, label: "info:$_SERVER" },
+  // Targeted CI credential access
+  {
+    regex: /getenv\s*\(\s*['"](?:GITHUB_TOKEN|COMPOSER_AUTH|PACKAGIST_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|HEROKU_API_KEY|CODECOV_TOKEN)['"]/,
+    label: "cred:ci-token"
+  }
+];
+var PHP_EXTENSIONS = /* @__PURE__ */ new Set([".php", ".phtml", ".php5", ".php7", ".phps"]);
+
+// src/ecosystems/php/index.ts
+function stripTopLevel(files) {
+  const result = /* @__PURE__ */ new Map();
+  for (const [path, content] of files) {
+    const slash = path.indexOf("/");
+    const stripped = slash >= 0 ? path.slice(slash + 1) : path;
+    if (stripped) result.set(stripped, content);
+  }
+  return result;
+}
+var PhpAnalyzer = class {
+  ecosystem = "php";
+  async analyzeChange(change, options) {
+    const { name, change_type, old_version, new_version, is_direct, is_dev } = change;
+    const base = {
+      name,
+      changeType: change_type,
+      isDirect: is_direct,
+      isDev: is_dev,
+      ecosystem: this.ecosystem
+    };
+    const registryCheck = checkRegistry(change);
+    if (change_type === "removed") {
+      return {
+        ...base,
+        oldVersion: old_version,
+        newVersion: null,
+        ...registryCheck && { registryCheck }
+      };
+    }
+    if (change_type === "added") {
+      const { meta: newMeta, allVersions } = await fetchPackagistWithVersions(name, new_version);
+      const artifact = getArtifactInfo2(newMeta);
+      const repoUrl2 = extractRepoUrl2(newMeta);
+      if (!artifact) {
+        return {
+          ...base,
+          oldVersion: null,
+          newVersion: new_version,
+          error: "no downloadable artifact found on Packagist",
+          ...registryCheck && { registryCheck }
+        };
+      }
+      const [newFiles2, repoCheck2] = await Promise.all([
+        downloadArtifact(artifact.url).then(
+          (data) => stripTopLevel(extractZip(data, PHP_EXTENSIONS))
+        ),
+        checkRepoRelease({ repoUrl: repoUrl2, packageName: name, oldVersion: null, newVersion: new_version })
+      ]);
+      const newFindings2 = scanPatterns(newFiles2, DANGEROUS_PATTERNS3);
+      const newHooks = detectComposerHooks(newFiles2);
+      return {
+        ...base,
+        oldVersion: null,
+        newVersion: new_version,
+        verification: {
+          platforms: options.platforms,
+          oldArtifacts: [],
+          newArtifacts: [artifact]
+        },
+        registryInfo: extractRegistryInfo2(newMeta, allVersions),
+        securityFindings: {
+          old: [],
+          new: newFindings2,
+          delta: newFindings2,
+          platformDivergence: false
+        },
+        ...newHooks.length > 0 && { installHooks: newHooks.map((h) => ({ ...h, isNew: true })) },
+        ...repoCheck2 && { repoCheck: repoCheck2 },
+        ...registryCheck && { registryCheck }
+      };
+    }
+    const [newFetched, oldFetched] = await Promise.all([
+      fetchPackagistWithVersions(name, new_version),
+      fetchPackagistWithVersions(name, old_version)
+    ]);
+    const newArtifact = getArtifactInfo2(newFetched.meta);
+    const oldArtifact = getArtifactInfo2(oldFetched.meta);
+    const repoUrl = extractRepoUrl2(newFetched.meta);
+    if (!newArtifact) {
+      return {
+        ...base,
+        oldVersion: old_version,
+        newVersion: new_version,
+        error: "no downloadable artifact found on Packagist for new version",
+        ...registryCheck && { registryCheck }
+      };
+    }
+    const downloads = [
+      downloadArtifact(newArtifact.url).then(
+        (data) => stripTopLevel(extractZip(data, PHP_EXTENSIONS))
+      )
+    ];
+    if (oldArtifact) {
+      downloads.push(
+        downloadArtifact(oldArtifact.url).then(
+          (data) => stripTopLevel(extractZip(data, PHP_EXTENSIONS))
+        )
+      );
+    }
+    const [newFiles, maybeOldFiles, repoCheck] = await Promise.all([
+      downloads[0],
+      downloads[1] ?? Promise.resolve(/* @__PURE__ */ new Map()),
+      checkRepoRelease({
+        repoUrl,
+        packageName: name,
+        oldVersion: old_version,
+        newVersion: new_version
+      })
+    ]);
+    const oldFiles = maybeOldFiles;
+    const newFindings = scanPatterns(newFiles, DANGEROUS_PATTERNS3);
+    const oldFindings = scanPatterns(oldFiles, DANGEROUS_PATTERNS3);
+    const annotated = annotateHooks(detectComposerHooks(oldFiles), detectComposerHooks(newFiles));
+    const metadataDelta = computeMetadataDelta2(oldFetched.meta, newFetched.meta);
+    return {
+      ...base,
+      oldVersion: old_version,
+      newVersion: new_version,
+      verification: {
+        platforms: options.platforms,
+        oldArtifacts: oldArtifact ? [oldArtifact] : [],
+        newArtifacts: [newArtifact]
+      },
+      registryInfo: extractRegistryInfo2(newFetched.meta, newFetched.allVersions),
+      metadataDelta,
+      codeDelta: diffFiles(oldFiles, newFiles),
+      securityFindings: {
+        old: oldFindings,
+        new: newFindings,
+        delta: findingsDelta(oldFindings, newFindings),
+        platformDivergence: false
+      },
+      ...annotated.length > 0 && { installHooks: annotated },
+      ...repoCheck && { repoCheck },
+      ...registryCheck && { registryCheck }
+    };
+  }
+};
+
 // src/ecosystems/python/index.ts
 var import_node_path14 = require("path");
 
@@ -31752,7 +32059,7 @@ function binaryFindingsDelta(oldScans, newScans) {
 }
 
 // src/ecosystems/python/patterns.ts
-var DANGEROUS_PATTERNS3 = [
+var DANGEROUS_PATTERNS4 = [
   { regex: /\beval\s*\(/, label: "exec:eval" },
   { regex: /\bexec\s*\(/, label: "exec:exec" },
   { regex: /\bcompile\s*\(/, label: "exec:compile" },
@@ -31900,7 +32207,7 @@ async function downloadAndVerify(artifact) {
   return data;
 }
 var REPO_URL_KEYS = ["source", "source code", "repository", "code", "github", "gitlab"];
-function extractRepoUrl2(meta) {
+function extractRepoUrl3(meta) {
   const urls = meta.info.project_urls;
   if (!urls) return meta.info.home_page ?? void 0;
   for (const [key, url] of Object.entries(urls)) {
@@ -31908,7 +32215,7 @@ function extractRepoUrl2(meta) {
   }
   return meta.info.home_page ?? void 0;
 }
-function extractRegistryInfo2(meta) {
+function extractRegistryInfo3(meta) {
   const { info, releases } = meta;
   let firstUpload;
   let ageDays;
@@ -31946,7 +32253,7 @@ function extractRegistryInfo2(meta) {
     requiresDist: info.requires_dist ?? []
   };
 }
-function computeMetadataDelta2(oldMeta, newMeta) {
+function computeMetadataDelta3(oldMeta, newMeta) {
   const oldDeps = new Set(oldMeta.info.requires_dist ?? []);
   const newDeps = new Set(newMeta.info.requires_dist ?? []);
   return {
@@ -31979,7 +32286,7 @@ async function scanArtifacts(artifacts, tmpDir, tag) {
           [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)])
         );
       }
-      return { artifact, files, findings: scanPatterns(files, DANGEROUS_PATTERNS3), binaryScans };
+      return { artifact, files, findings: scanPatterns(files, DANGEROUS_PATTERNS4), binaryScans };
     })
   );
 }
@@ -32082,7 +32389,7 @@ var PythonAnalyzer = class {
           ...registryCheck && { registryCheck }
         };
       }
-      const repoUrl2 = extractRepoUrl2(newMeta2);
+      const repoUrl2 = extractRepoUrl3(newMeta2);
       const [newScans2, repoCheck2] = await Promise.all([
         scanArtifacts(newArtifacts2, tmpDir, `${name}_${new_version}_new`),
         checkRepoRelease({ repoUrl: repoUrl2, packageName: name, oldVersion: null, newVersion: new_version })
@@ -32094,7 +32401,7 @@ var PythonAnalyzer = class {
         oldVersion: null,
         newVersion: new_version,
         verification: { platforms, oldArtifacts: [], newArtifacts: newArtifacts2 },
-        registryInfo: extractRegistryInfo2(newMeta2),
+        registryInfo: extractRegistryInfo3(newMeta2),
         securityFindings: { old: [], new: findings, delta: findings, platformDivergence },
         ...binaryDelta2.length > 0 && { binaryFindings: { delta: binaryDelta2 } },
         ...hooks.length > 0 && { installHooks: hooks.map((h) => ({ ...h, isNew: true })) },
@@ -32108,7 +32415,7 @@ var PythonAnalyzer = class {
     ]);
     const newArtifacts = selectArtifacts(newMeta, platforms);
     const oldArtifacts = selectArtifacts(oldMeta, platforms);
-    const repoUrl = extractRepoUrl2(newMeta);
+    const repoUrl = extractRepoUrl3(newMeta);
     if (newArtifacts.length === 0) {
       return {
         ...base,
@@ -32159,7 +32466,7 @@ var PythonAnalyzer = class {
     const annotated = annotateHooks(oldDerived.hooks, newDerived.hooks);
     const buildSystemChanged = checkBuildSystemFiles(oldScans[0].files, newScans[0].files);
     const newBinaryWheels = oldArtifacts.every((a) => a.isSdist) && newArtifacts.some((a) => !a.isSdist);
-    const baseDelta = computeMetadataDelta2(oldMeta, newMeta);
+    const baseDelta = computeMetadataDelta3(oldMeta, newMeta);
     const metadataDelta = {
       ...baseDelta,
       ...buildSystemChanged && { buildSystemChanged },
@@ -32190,7 +32497,8 @@ var PythonAnalyzer = class {
 var registry = /* @__PURE__ */ new Map([
   ["python", new PythonAnalyzer()],
   ["javascript", new JavaScriptAnalyzer()],
-  ["deno", new DenoAnalyzer()]
+  ["deno", new DenoAnalyzer()],
+  ["php", new PhpAnalyzer()]
 ]);
 function getAnalyzer(ecosystem) {
   return registry.get(ecosystem);
@@ -32201,7 +32509,8 @@ var OSV_BATCH_URL = "https://api.osv.dev/v1/querybatch";
 var OSV_VULN_URL = "https://api.osv.dev/v1/vulns";
 var OSV_ECOSYSTEM = {
   javascript: "npm",
-  python: "PyPI"
+  python: "PyPI",
+  php: "Packagist"
 };
 function toKnownVuln(v2) {
   const db = v2.database_specific;

@@ -6,6 +6,7 @@ const OSV_VULN_URL = 'https://api.osv.dev/v1/vulns';
 const OSV_ECOSYSTEM: Record<string, string> = {
   javascript: 'npm',
   python: 'PyPI',
+  php: 'Packagist',
 };
 
 interface OsvBatchVulnRef {
