@@ -1,12 +1,14 @@
 import type { EcosystemAnalyzer } from './base.js';
 import { DenoAnalyzer } from './deno/index.js';
 import { JavaScriptAnalyzer } from './javascript/index.js';
+import { PhpAnalyzer } from './php/index.js';
 import { PythonAnalyzer } from './python/index.js';
 
 const registry = new Map<string, EcosystemAnalyzer>([
   ['python', new PythonAnalyzer()],
   ['javascript', new JavaScriptAnalyzer()],
   ['deno', new DenoAnalyzer()],
+  ['php', new PhpAnalyzer()],
 ]);
 
 export function getAnalyzer(ecosystem: string): EcosystemAnalyzer | undefined {

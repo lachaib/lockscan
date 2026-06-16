@@ -56,6 +56,37 @@ export function detectPythonWheelHooks(files: FileMap): InstallHook[] {
   return hooks;
 }
 
+/** Composer lifecycle scripts that execute automatically on install/update. */
+const COMPOSER_AUTO_SCRIPTS = new Set([
+  'pre-install-cmd',
+  'post-install-cmd',
+  'pre-update-cmd',
+  'post-update-cmd',
+  'pre-autoload-dump',
+  'post-autoload-dump',
+]);
+
+export function detectComposerHooks(files: FileMap): InstallHook[] {
+  const raw = files.get('composer.json');
+  if (!raw) return [];
+  let pkg: Record<string, unknown>;
+  try {
+    pkg = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+  const scripts = pkg.scripts as Record<string, unknown> | undefined;
+  if (!scripts) return [];
+  const hooks: InstallHook[] = [];
+  for (const name of COMPOSER_AUTO_SCRIPTS) {
+    const entry = scripts[name];
+    if (!entry) continue;
+    const command = Array.isArray(entry) ? entry.join(' && ') : String(entry);
+    hooks.push({ type: 'composer-script', name, command, isNew: false, changed: false });
+  }
+  return hooks;
+}
+
 /**
  * Annotate new hooks with isNew/changed flags by comparing against old version hooks.
  * Returns only hooks that are new or modified.

@@ -53,7 +53,7 @@ export async function analyze(
       // Batch OSV lookup for all new/updated versions in this lockfile
       const osvResults = await queryOsv(
         changes
-          .filter((c) => c.new_version && c.change_type !== 'removed')
+          .filter((c) => c.change_type !== 'removed')
           .map((c) => ({ name: c.name, version: c.new_version!, ecosystem: lf.ecosystem })),
       );
 

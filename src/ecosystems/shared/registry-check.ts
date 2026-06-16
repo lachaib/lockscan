@@ -7,6 +7,9 @@ const PUBLIC_REGISTRY_PREFIXES = [
   'https://pypi.python.org',
   'https://files.pythonhosted.org',
   'https://upload.pypi.org',
+  // Packagist (PHP) distributes packages via GitHub zipballs
+  'https://api.github.com',
+  'https://codeload.github.com',
 ];
 
 function isPublic(url?: string): boolean {

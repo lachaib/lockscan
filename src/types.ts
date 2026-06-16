@@ -23,7 +23,7 @@ export interface RepoCheck {
 
 /** A post-install hook found inside the package. */
 export interface InstallHook {
-  type: 'npm-script' | 'pth-file' | 'data-script';
+  type: 'npm-script' | 'pth-file' | 'data-script' | 'composer-script';
   name: string;
   command?: string;
   isNew: boolean;
