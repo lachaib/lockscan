@@ -48,26 +48,74 @@ const DANGEROUS_NATIVE_SYMBOLS = [
 
 const SYMBOL_SET = new Set<string>(DANGEROUS_NATIVE_SYMBOLS);
 
-const SUSPICIOUS_STRING_PATTERNS: RegExp[] = [
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
-  /https?:\/\/[^\s"'<>\x00]{10,}/,
-  /\b(?:\d{1,3}\.){3}\d{1,3}\b/,
-  /\/etc\/(?:passwd|shadow|hosts|crontab|sudoers)/,
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
-  /\/tmp\/[^\s\x00]{3,}/,
-  /[A-Za-z0-9+/]{48,}={0,2}/,
+interface SuspiciousStringPattern {
+  regex: RegExp;
+  label: string;
+}
+
+// Ordered most-specific / most-dangerous first — first match wins per string.
+const SUSPICIOUS_STRING_PATTERNS: SuspiciousStringPattern[] = [
+  // Sensitive system paths hardcoded in a binary are almost always malicious.
+  {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
+    regex: /\/etc\/(?:passwd|shadow|hosts|crontab|sudoers)/,
+    label: 'binary:sensitive-path',
+  },
+  // Non-HTTP schemes have no legitimate reason to be hardcoded in a library binary:
+  // WebSocket (covert channel), DNS/UDP/TCP (tunnelling), SMTP/IMAP (email exfil),
+  // SOCKS (proxy pivoting), IRC (botnet C2), FTP.
+  {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
+    regex: /(?:wss?|dns|udp|tcp|smtps?|imaps?|socks[45]|ircs?|ftps?):\/\/[^\s"'<>\x00]{6,}/,
+    label: 'binary:url-other-scheme',
+  },
+  // HTTP/HTTPS URLs appear in doc strings, SDK headers, and cert authority endpoints —
+  // worth surfacing but lower signal than exotic schemes.
+  {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
+    regex: /https?:\/\/[^\s"'<>\x00]{10,}/,
+    label: 'binary:url-http',
+  },
+  // IPv6 addresses — often used for C2 to evade IPv4-centric blocklists.
+  // Requires at least 4 colon-separated hex groups to avoid matching short tokens.
+  {
+    regex: /(?:[0-9a-fA-F]{1,4}:){3,7}[0-9a-fA-F]{0,4}/,
+    label: 'binary:ip-v6',
+  },
+  // IPv4 addresses.
+  {
+    regex: /\b(?:\d{1,3}\.){3}\d{1,3}\b/,
+    label: 'binary:ip-v4',
+  },
+  // Temp directory paths.
+  {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
+    regex: /\/tmp\/[^\s\x00]{3,}/,
+    label: 'binary:tmppath',
+  },
+  // Long base64-like blobs — low signal in isolation; common in crypto libs as constants,
+  // OIDs, and test vectors.
+  {
+    regex: /[A-Za-z0-9+/]{48,}={0,2}/,
+    label: 'binary:base64',
+  },
 ];
 
 const HIGH_ENTROPY_THRESHOLD = 7.2;
 const SYMBOL_COUNT_RATIO_THRESHOLD = 5;
 const SYMBOL_COUNT_ABS_THRESHOLD = 5;
 
+export interface SuspiciousString {
+  text: string;
+  label: string;
+}
+
 export interface BinaryScan {
   filename: string;
   /** How many times each dangerous symbol name appears in the binary's string data. */
   symbolCounts: Record<string, number>;
-  /** Suspicious strings extracted from the binary (URLs, IPs, base64 blobs, etc.). */
-  suspiciousStrings: string[];
+  /** Suspicious strings extracted from the binary, each tagged with its detection label. */
+  suspiciousStrings: SuspiciousString[];
   /** Shannon entropy of the binary — high values suggest packed/encrypted sections. */
   entropy: number;
 }
@@ -125,13 +173,17 @@ export function scanBinary(filename: string, data: Buffer): BinaryScan {
   }
 
   const seen = new Set<string>();
-  const suspiciousStrings: string[] = [];
+  const suspiciousStrings: SuspiciousString[] = [];
   for (const s of strings) {
-    if (!seen.has(s) && SUSPICIOUS_STRING_PATTERNS.some((p) => p.test(s))) {
-      seen.add(s);
-      suspiciousStrings.push(s);
-      if (suspiciousStrings.length >= 50) break;
+    if (seen.has(s)) continue;
+    for (const { regex, label } of SUSPICIOUS_STRING_PATTERNS) {
+      if (regex.test(s)) {
+        seen.add(s);
+        suspiciousStrings.push({ text: s, label });
+        break; // first matching pattern wins — most dangerous label assigned
+      }
     }
+    if (suspiciousStrings.length >= 50) break;
   }
 
   return { filename, symbolCounts, suspiciousStrings, entropy: shannonEntropy(data) };
@@ -183,13 +235,13 @@ export function binaryFindingsDelta(
     }
 
     // New suspicious strings not present in old version
-    const oldStrSet = new Set(oldScan?.suspiciousStrings ?? []);
-    for (const s of newScan.suspiciousStrings) {
-      if (!oldStrSet.has(s)) {
+    const oldStrSet = new Set(oldScan?.suspiciousStrings.map((s) => s.text) ?? []);
+    for (const { text, label } of newScan.suspiciousStrings) {
+      if (!oldStrSet.has(text)) {
         findings.push({
           file: filename,
-          label: 'binary:new-string',
-          detail: s.length > 100 ? `${s.slice(0, 100)}…` : s,
+          label,
+          detail: text.length > 100 ? `${text.slice(0, 100)}…` : text,
         });
       }
     }

@@ -26597,6 +26597,14 @@ function effectivePatternSeverity(label, oldCount, newCount) {
   if (netIncrease < threshold) return "low";
   return base;
 }
+function binaryFindingSeverity(label) {
+  if (label === "binary:sensitive-path" || label === "binary:url-other-scheme") return "high";
+  if (label === "binary:high-entropy" || label.startsWith("native:")) return "high";
+  if (label === "binary:url-http" || label === "binary:ip-v4" || label === "binary:ip-v6" || label === "binary:tmppath")
+    return "moderate";
+  if (label === "binary:base64") return "low";
+  return "high";
+}
 function packageMaxSeverity(pkg) {
   let s3 = null;
   for (const v2 of pkg.knownVulns ?? []) {
@@ -26611,7 +26619,9 @@ function packageMaxSeverity(pkg) {
       s3 = higher(s3, effectivePatternSeverity(f2.label, oldCount, newCount));
     }
   }
-  if ((pkg.binaryFindings?.delta.length ?? 0) > 0) s3 = higher(s3, "high");
+  for (const f2 of pkg.binaryFindings?.delta ?? []) {
+    s3 = higher(s3, binaryFindingSeverity(f2.label));
+  }
   if (pkg.securityFindings?.platformDivergence) s3 = higher(s3, "high");
   if (pkg.metadataDelta?.publisherChanged) s3 = higher(s3, "high");
   if (pkg.metadataDelta?.buildSystemChanged) s3 = higher(s3, "high");
@@ -31953,13 +31963,50 @@ var DANGEROUS_NATIVE_SYMBOLS = [
 ];
 var SYMBOL_SET = new Set(DANGEROUS_NATIVE_SYMBOLS);
 var SUSPICIOUS_STRING_PATTERNS = [
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
-  /https?:\/\/[^\s"'<>\x00]{10,}/,
-  /\b(?:\d{1,3}\.){3}\d{1,3}\b/,
-  /\/etc\/(?:passwd|shadow|hosts|crontab|sudoers)/,
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
-  /\/tmp\/[^\s\x00]{3,}/,
-  /[A-Za-z0-9+/]{48,}={0,2}/
+  // Sensitive system paths hardcoded in a binary are almost always malicious.
+  {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
+    regex: /\/etc\/(?:passwd|shadow|hosts|crontab|sudoers)/,
+    label: "binary:sensitive-path"
+  },
+  // Non-HTTP schemes have no legitimate reason to be hardcoded in a library binary:
+  // WebSocket (covert channel), DNS/UDP/TCP (tunnelling), SMTP/IMAP (email exfil),
+  // SOCKS (proxy pivoting), IRC (botnet C2), FTP.
+  {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
+    regex: /(?:wss?|dns|udp|tcp|smtps?|imaps?|socks[45]|ircs?|ftps?):\/\/[^\s"'<>\x00]{6,}/,
+    label: "binary:url-other-scheme"
+  },
+  // HTTP/HTTPS URLs appear in doc strings, SDK headers, and cert authority endpoints —
+  // worth surfacing but lower signal than exotic schemes.
+  {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
+    regex: /https?:\/\/[^\s"'<>\x00]{10,}/,
+    label: "binary:url-http"
+  },
+  // IPv6 addresses — often used for C2 to evade IPv4-centric blocklists.
+  // Requires at least 4 colon-separated hex groups to avoid matching short tokens.
+  {
+    regex: /(?:[0-9a-fA-F]{1,4}:){3,7}[0-9a-fA-F]{0,4}/,
+    label: "binary:ip-v6"
+  },
+  // IPv4 addresses.
+  {
+    regex: /\b(?:\d{1,3}\.){3}\d{1,3}\b/,
+    label: "binary:ip-v4"
+  },
+  // Temp directory paths.
+  {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
+    regex: /\/tmp\/[^\s\x00]{3,}/,
+    label: "binary:tmppath"
+  },
+  // Long base64-like blobs — low signal in isolation; common in crypto libs as constants,
+  // OIDs, and test vectors.
+  {
+    regex: /[A-Za-z0-9+/]{48,}={0,2}/,
+    label: "binary:base64"
+  }
 ];
 var HIGH_ENTROPY_THRESHOLD = 7.2;
 var SYMBOL_COUNT_RATIO_THRESHOLD = 5;
@@ -32007,11 +32054,15 @@ function scanBinary(filename, data) {
   const seen = /* @__PURE__ */ new Set();
   const suspiciousStrings = [];
   for (const s3 of strings) {
-    if (!seen.has(s3) && SUSPICIOUS_STRING_PATTERNS.some((p2) => p2.test(s3))) {
-      seen.add(s3);
-      suspiciousStrings.push(s3);
-      if (suspiciousStrings.length >= 50) break;
+    if (seen.has(s3)) continue;
+    for (const { regex, label } of SUSPICIOUS_STRING_PATTERNS) {
+      if (regex.test(s3)) {
+        seen.add(s3);
+        suspiciousStrings.push({ text: s3, label });
+        break;
+      }
     }
+    if (suspiciousStrings.length >= 50) break;
   }
   return { filename, symbolCounts, suspiciousStrings, entropy: shannonEntropy(data) };
 }
@@ -32044,13 +32095,13 @@ function binaryFindingsDelta(oldScans, newScans) {
         });
       }
     }
-    const oldStrSet = new Set(oldScan?.suspiciousStrings ?? []);
-    for (const s3 of newScan.suspiciousStrings) {
-      if (!oldStrSet.has(s3)) {
+    const oldStrSet = new Set(oldScan?.suspiciousStrings.map((s3) => s3.text) ?? []);
+    for (const { text, label } of newScan.suspiciousStrings) {
+      if (!oldStrSet.has(text)) {
         findings.push({
           file: filename,
-          label: "binary:new-string",
-          detail: s3.length > 100 ? `${s3.slice(0, 100)}\u2026` : s3
+          label,
+          detail: text.length > 100 ? `${text.slice(0, 100)}\u2026` : text
         });
       }
     }

@@ -125,6 +125,24 @@ function effectivePatternSeverity(
   return base;
 }
 
+function binaryFindingSeverity(label: string): Severity {
+  // Sensitive paths and non-HTTP schemes have no legitimate reason in a compiled lib.
+  if (label === 'binary:sensitive-path' || label === 'binary:url-other-scheme') return 'high';
+  // Entropy spikes and new dangerous native symbols are high-confidence signals.
+  if (label === 'binary:high-entropy' || label.startsWith('native:')) return 'high';
+  // HTTP URLs, IPv4/v6, and temp paths warrant attention but appear in legitimate packages.
+  if (
+    label === 'binary:url-http' ||
+    label === 'binary:ip-v4' ||
+    label === 'binary:ip-v6' ||
+    label === 'binary:tmppath'
+  )
+    return 'moderate';
+  // Long base64 blobs are expected in crypto/data libraries as constants and OIDs.
+  if (label === 'binary:base64') return 'low';
+  return 'high'; // unknown label — conservative fallback
+}
+
 export function packageMaxSeverity(pkg: PackageAnalysis): Severity | null {
   let s: Severity | null = null;
 
@@ -142,7 +160,9 @@ export function packageMaxSeverity(pkg: PackageAnalysis): Severity | null {
     }
   }
 
-  if ((pkg.binaryFindings?.delta.length ?? 0) > 0) s = higher(s, 'high');
+  for (const f of pkg.binaryFindings?.delta ?? []) {
+    s = higher(s, binaryFindingSeverity(f.label));
+  }
   if (pkg.securityFindings?.platformDivergence) s = higher(s, 'high');
   if (pkg.metadataDelta?.publisherChanged) s = higher(s, 'high');
   if (pkg.metadataDelta?.buildSystemChanged) s = higher(s, 'high');
