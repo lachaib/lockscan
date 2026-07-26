@@ -1,3 +1,5 @@
+import { extractImportedSymbols } from './binary-formats.js';
+
 /** Dangerous libc / OS symbols — a pure math or data library importing these is suspicious. */
 const DANGEROUS_NATIVE_SYMBOLS = [
   // Network
@@ -164,11 +166,14 @@ export function shannonEntropy(data: Buffer): number {
 export function scanBinary(filename: string, data: Buffer): BinaryScan {
   const strings = extractStrings(data);
 
-  // Symbol name appears in .dynstr/.strtab as a null-terminated token — exact match captures it.
+  // Match only against the binary's imported/undefined symbol table (the actual external
+  // calls it can make), never the full string dump — compiler-mangled defined symbols
+  // (mypyc, Cython, C++) routinely contain these names as substrings without being calls
+  // to them. See https://github.com/lachaib/lockscan/issues/4.
   const symbolCounts: Record<string, number> = {};
-  for (const s of strings) {
-    if (SYMBOL_SET.has(s)) {
-      symbolCounts[s] = (symbolCounts[s] ?? 0) + 1;
+  for (const sym of extractImportedSymbols(data)) {
+    if (SYMBOL_SET.has(sym)) {
+      symbolCounts[sym] = (symbolCounts[sym] ?? 0) + 1;
     }
   }
 
