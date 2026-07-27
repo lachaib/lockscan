@@ -31914,6 +31914,230 @@ var PhpAnalyzer = class {
 // src/ecosystems/python/index.ts
 var import_node_path14 = require("path");
 
+// src/ecosystems/python/binary-formats.ts
+function extractImportedSymbols(data) {
+  try {
+    if (data.length < 4) return [];
+    const magic = data.readUInt32LE(0);
+    if (magic === ELF_MAGIC) return parseElfImports(data);
+    if (magic === MH_MAGIC || magic === MH_MAGIC_64) return parseThinMachO(data, 0, data.length);
+    const fatMagic = data.readUInt32BE(0);
+    if (fatMagic === FAT_MAGIC || fatMagic === FAT_MAGIC_64) {
+      return parseFatMachO(data, fatMagic === FAT_MAGIC_64);
+    }
+    if (data[0] === 77 && data[1] === 90) return parsePeImports(data);
+    return [];
+  } catch {
+    return [];
+  }
+}
+function readCString(data, offset) {
+  if (offset < 0 || offset >= data.length) return "";
+  let end = offset;
+  while (end < data.length && data[end] !== 0) end++;
+  return data.subarray(offset, end).toString("ascii");
+}
+var ELF_MAGIC = 1179403647;
+var SHT_DYNSYM = 11;
+function parseElfImports(data) {
+  if (data.length < 20) return [];
+  const eiClass = data[4];
+  const eiData = data[5];
+  if (eiData !== 1) return [];
+  const is64 = eiClass === 2;
+  let eShoff;
+  let eShentsize;
+  let eShnum;
+  if (is64) {
+    if (data.length < 64) return [];
+    eShoff = Number(data.readBigUInt64LE(40));
+    eShentsize = data.readUInt16LE(58);
+    eShnum = data.readUInt16LE(60);
+  } else {
+    if (data.length < 52) return [];
+    eShoff = data.readUInt32LE(32);
+    eShentsize = data.readUInt16LE(46);
+    eShnum = data.readUInt16LE(48);
+  }
+  if (eShentsize === 0) return [];
+  const sections = [];
+  for (let i = 0; i < eShnum; i++) {
+    const base = eShoff + i * eShentsize;
+    if (base + eShentsize > data.length) break;
+    sections.push(
+      is64 ? {
+        type: data.readUInt32LE(base + 4),
+        offset: Number(data.readBigUInt64LE(base + 24)),
+        size: Number(data.readBigUInt64LE(base + 32)),
+        link: data.readUInt32LE(base + 40),
+        entsize: Number(data.readBigUInt64LE(base + 56))
+      } : {
+        type: data.readUInt32LE(base + 4),
+        offset: data.readUInt32LE(base + 16),
+        size: data.readUInt32LE(base + 20),
+        link: data.readUInt32LE(base + 24),
+        entsize: data.readUInt32LE(base + 36)
+      }
+    );
+  }
+  const dynsym = sections.find((s3) => s3.type === SHT_DYNSYM);
+  const dynstr = dynsym ? sections[dynsym.link] : void 0;
+  if (!dynsym || !dynstr) return [];
+  const entsize = dynsym.entsize || (is64 ? 24 : 16);
+  const count = Math.floor(dynsym.size / entsize);
+  const names = [];
+  for (let i = 0; i < count; i++) {
+    const symBase = dynsym.offset + i * entsize;
+    if (symBase + entsize > data.length) break;
+    const stName = data.readUInt32LE(symBase);
+    const stShndx = is64 ? data.readUInt16LE(symBase + 6) : data.readUInt16LE(symBase + 14);
+    if (stName === 0 || stShndx !== 0) continue;
+    const name = readCString(data, dynstr.offset + stName);
+    if (name) names.push(name);
+  }
+  return names;
+}
+var MH_MAGIC = 4277009102;
+var MH_MAGIC_64 = 4277009103;
+var FAT_MAGIC = 3405691582;
+var FAT_MAGIC_64 = 3405691583;
+var LC_SYMTAB = 2;
+var LC_DYSYMTAB = 11;
+var N_TYPE_MASK = 14;
+var N_UNDF = 0;
+function parseFatMachO(data, is64Arch) {
+  if (data.length < 8) return [];
+  const nfatArch = data.readUInt32BE(4);
+  const archEntrySize = is64Arch ? 32 : 20;
+  const names = [];
+  for (let i = 0; i < nfatArch; i++) {
+    const base = 8 + i * archEntrySize;
+    if (base + archEntrySize > data.length) break;
+    const offset = is64Arch ? Number(data.readBigUInt64BE(base + 8)) : data.readUInt32BE(base + 8);
+    const size = is64Arch ? Number(data.readBigUInt64BE(base + 16)) : data.readUInt32BE(base + 12);
+    if (size <= 0 || offset + size > data.length) continue;
+    names.push(...parseThinMachO(data, offset, offset + size));
+  }
+  return names;
+}
+function parseThinMachO(data, start, end) {
+  if (start + 4 > end) return [];
+  const magic = data.readUInt32LE(start);
+  if (magic !== MH_MAGIC && magic !== MH_MAGIC_64) return [];
+  const is64 = magic === MH_MAGIC_64;
+  const headerSize = is64 ? 32 : 28;
+  if (start + headerSize > end) return [];
+  const ncmds = data.readUInt32LE(start + 16);
+  let symtabOffset = -1;
+  let nsyms = 0;
+  let stroff = -1;
+  let iundefsym = -1;
+  let nundefsym = -1;
+  let cmdPtr = start + headerSize;
+  for (let i = 0; i < ncmds; i++) {
+    if (cmdPtr + 8 > end) break;
+    const cmd = data.readUInt32LE(cmdPtr);
+    const cmdsize = data.readUInt32LE(cmdPtr + 4);
+    if (cmdsize < 8 || cmdPtr + cmdsize > end) break;
+    if (cmd === LC_SYMTAB && cmdsize >= 24) {
+      symtabOffset = start + data.readUInt32LE(cmdPtr + 8);
+      nsyms = data.readUInt32LE(cmdPtr + 12);
+      stroff = start + data.readUInt32LE(cmdPtr + 16);
+    } else if (cmd === LC_DYSYMTAB && cmdsize >= 32) {
+      iundefsym = data.readUInt32LE(cmdPtr + 24);
+      nundefsym = data.readUInt32LE(cmdPtr + 28);
+    }
+    cmdPtr += cmdsize;
+  }
+  if (symtabOffset < 0 || stroff < 0) return [];
+  const nlistSize = is64 ? 16 : 12;
+  const hasDysymtab = iundefsym >= 0 && nundefsym >= 0;
+  const rangeStart = hasDysymtab ? iundefsym : 0;
+  const rangeCount = hasDysymtab ? nundefsym : nsyms;
+  const names = [];
+  for (let i = 0; i < rangeCount; i++) {
+    const idx = rangeStart + i;
+    if (idx >= nsyms) break;
+    const symBase = symtabOffset + idx * nlistSize;
+    if (symBase + nlistSize > end) break;
+    const nStrx = data.readUInt32LE(symBase);
+    const nType = data[symBase + 4];
+    if (!hasDysymtab && (nType & N_TYPE_MASK) !== N_UNDF) continue;
+    if (nStrx === 0) continue;
+    const name = readCString(data, stroff + nStrx);
+    if (!name) continue;
+    names.push(name.startsWith("_") ? name.slice(1) : name);
+  }
+  return names;
+}
+function parsePeImports(data) {
+  if (data.length < 64) return [];
+  const peOffset = data.readUInt32LE(60);
+  if (peOffset + 24 > data.length) return [];
+  if (data.readUInt32LE(peOffset) !== 17744) return [];
+  const numberOfSections = data.readUInt16LE(peOffset + 6);
+  const sizeOfOptionalHeader = data.readUInt16LE(peOffset + 20);
+  const optHeaderOffset = peOffset + 24;
+  if (sizeOfOptionalHeader === 0 || optHeaderOffset + sizeOfOptionalHeader > data.length) return [];
+  const magic = data.readUInt16LE(optHeaderOffset);
+  const isPe32Plus = magic === 523;
+  const importDirEntryOffset = optHeaderOffset + (isPe32Plus ? 112 : 96) + 8;
+  if (importDirEntryOffset + 8 > data.length) return [];
+  const importDirRva = data.readUInt32LE(importDirEntryOffset);
+  const importDirSize = data.readUInt32LE(importDirEntryOffset + 4);
+  if (importDirRva === 0 || importDirSize === 0) return [];
+  const sectionTableOffset = optHeaderOffset + sizeOfOptionalHeader;
+  const sections = [];
+  for (let i = 0; i < numberOfSections; i++) {
+    const base = sectionTableOffset + i * 40;
+    if (base + 40 > data.length) break;
+    sections.push({
+      va: data.readUInt32LE(base + 12),
+      size: data.readUInt32LE(base + 16),
+      rawOffset: data.readUInt32LE(base + 20)
+    });
+  }
+  const rvaToOffset = (rva) => {
+    for (const s3 of sections) {
+      if (rva >= s3.va && rva < s3.va + s3.size) return s3.rawOffset + (rva - s3.va);
+    }
+    return -1;
+  };
+  const names = [];
+  const seen = /* @__PURE__ */ new Set();
+  let descOffset = rvaToOffset(importDirRva);
+  const IMAGE_IMPORT_DESCRIPTOR_SIZE = 20;
+  let iterations = 0;
+  while (descOffset >= 0 && descOffset + IMAGE_IMPORT_DESCRIPTOR_SIZE <= data.length && iterations < 1e3) {
+    iterations++;
+    const originalFirstThunk = data.readUInt32LE(descOffset);
+    const nameRva = data.readUInt32LE(descOffset + 12);
+    const firstThunk = data.readUInt32LE(descOffset + 16);
+    if (originalFirstThunk === 0 && nameRva === 0 && firstThunk === 0) break;
+    const thunkRva = originalFirstThunk !== 0 ? originalFirstThunk : firstThunk;
+    let thunkOffset = rvaToOffset(thunkRva);
+    const entrySize = isPe32Plus ? 8 : 4;
+    const ordinalFlag = isPe32Plus ? 0x8000000000000000n : 2147483648;
+    while (thunkOffset >= 0 && thunkOffset + entrySize <= data.length) {
+      const entry = isPe32Plus ? data.readBigUInt64LE(thunkOffset) : BigInt(data.readUInt32LE(thunkOffset));
+      if (entry === 0n) break;
+      const isOrdinal = (entry & ordinalFlag) !== 0n;
+      if (!isOrdinal) {
+        const hintNameRva = Number(entry & 0x7fffffffn);
+        const hintNameOffset = rvaToOffset(hintNameRva);
+        if (hintNameOffset >= 0 && !seen.has(hintNameOffset)) {
+          seen.add(hintNameOffset);
+          const name = readCString(data, hintNameOffset + 2);
+          if (name) names.push(name);
+        }
+      }
+      thunkOffset += entrySize;
+    }
+    descOffset += IMAGE_IMPORT_DESCRIPTOR_SIZE;
+  }
+  return names;
+}
+
 // src/ecosystems/python/binary-scan.ts
 var DANGEROUS_NATIVE_SYMBOLS = [
   // Network
@@ -32046,9 +32270,9 @@ function shannonEntropy(data) {
 function scanBinary(filename, data) {
   const strings = extractStrings(data);
   const symbolCounts = {};
-  for (const s3 of strings) {
-    if (SYMBOL_SET.has(s3)) {
-      symbolCounts[s3] = (symbolCounts[s3] ?? 0) + 1;
+  for (const sym of extractImportedSymbols(data)) {
+    if (SYMBOL_SET.has(sym)) {
+      symbolCounts[sym] = (symbolCounts[sym] ?? 0) + 1;
     }
   }
   const seen = /* @__PURE__ */ new Set();
