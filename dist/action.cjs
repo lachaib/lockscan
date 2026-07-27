@@ -30189,6 +30189,7 @@ var SKIP_DIRS = /* @__PURE__ */ new Set([
   ".pytest_cache",
   ".ruff_cache"
 ]);
+var BINARY_SKIP_DIRS = /* @__PURE__ */ new Set([".git", "node_modules"]);
 async function extractTarball(data, destDir, fileExtensions) {
   await (0, import_promises2.mkdir)(destDir, { recursive: true });
   const tmpFile = `${destDir}.__archive.tgz`;
@@ -30201,7 +30202,7 @@ async function extractTarball(data, destDir, fileExtensions) {
   }
   return collectFiles(destDir, fileExtensions);
 }
-var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([".so", ".pyd", ".dylib", ".dll"]);
+var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([".so", ".pyd", ".dylib", ".dll", ".node"]);
 function extractZipBinaries(data) {
   const files = /* @__PURE__ */ new Map();
   const zip = new import_adm_zip.default(data);
@@ -30210,6 +30211,11 @@ function extractZipBinaries(data) {
     if (!BINARY_EXTENSIONS.has((0, import_node_path11.extname)(entry.entryName))) continue;
     files.set(entry.entryName, entry.getData());
   }
+  return files;
+}
+async function extractTarballBinaries(destDir, extensions = BINARY_EXTENSIONS) {
+  const files = /* @__PURE__ */ new Map();
+  await walkDir(destDir, destDir, extensions, files, (path) => (0, import_promises2.readFile)(path), BINARY_SKIP_DIRS);
   return files;
 }
 function extractZip(data, fileExtensions) {
@@ -30227,10 +30233,10 @@ function extractZip(data, fileExtensions) {
 }
 async function collectFiles(dir, extensions) {
   const files = /* @__PURE__ */ new Map();
-  await walkDir(dir, dir, extensions, files);
+  await walkDir(dir, dir, extensions, files, (path) => (0, import_promises2.readFile)(path, "utf8"), SKIP_DIRS);
   return files;
 }
-async function walkDir(baseDir, currentDir, extensions, files) {
+async function walkDir(baseDir, currentDir, extensions, files, readAs, skipDirs) {
   let entries;
   try {
     entries = await (0, import_promises2.readdir)(currentDir);
@@ -30246,13 +30252,13 @@ async function walkDir(baseDir, currentDir, extensions, files) {
       continue;
     }
     if (s3.isDirectory()) {
-      if (!SKIP_DIRS.has(entry)) {
-        await walkDir(baseDir, fullPath, extensions, files);
+      if (!skipDirs.has(entry)) {
+        await walkDir(baseDir, fullPath, extensions, files, readAs, skipDirs);
       }
     } else if (extensions.has((0, import_node_path11.extname)(entry))) {
       const rel = (0, import_node_path11.relative)(baseDir, fullPath);
       try {
-        files.set(rel, await (0, import_promises2.readFile)(fullPath, "utf8"));
+        files.set(rel, await readAs(fullPath));
       } catch {
       }
     }
@@ -30366,6 +30372,425 @@ function computeMetadataDelta(oldMeta, newMeta) {
     licenseChanged: licenseString(oldMeta) !== licenseString(newMeta),
     ...publisherChanged !== void 0 && { publisherChanged }
   };
+}
+
+// src/ecosystems/shared/binary-formats.ts
+function extractImportedSymbols(data) {
+  try {
+    if (data.length < 4) return [];
+    const magic = data.readUInt32LE(0);
+    if (magic === ELF_MAGIC) return parseElfImports(data);
+    if (magic === MH_MAGIC || magic === MH_MAGIC_64) return parseThinMachO(data, 0, data.length);
+    const fatMagic = data.readUInt32BE(0);
+    if (fatMagic === FAT_MAGIC || fatMagic === FAT_MAGIC_64) {
+      return parseFatMachO(data, fatMagic === FAT_MAGIC_64);
+    }
+    if (data[0] === 77 && data[1] === 90) return parsePeImports(data);
+    return [];
+  } catch {
+    return [];
+  }
+}
+function readCString(data, offset) {
+  if (offset < 0 || offset >= data.length) return "";
+  let end = offset;
+  while (end < data.length && data[end] !== 0) end++;
+  return data.subarray(offset, end).toString("ascii");
+}
+var ELF_MAGIC = 1179403647;
+var SHT_DYNSYM = 11;
+function parseElfImports(data) {
+  if (data.length < 20) return [];
+  const eiClass = data[4];
+  const eiData = data[5];
+  if (eiData !== 1) return [];
+  const is64 = eiClass === 2;
+  let eShoff;
+  let eShentsize;
+  let eShnum;
+  if (is64) {
+    if (data.length < 64) return [];
+    eShoff = Number(data.readBigUInt64LE(40));
+    eShentsize = data.readUInt16LE(58);
+    eShnum = data.readUInt16LE(60);
+  } else {
+    if (data.length < 52) return [];
+    eShoff = data.readUInt32LE(32);
+    eShentsize = data.readUInt16LE(46);
+    eShnum = data.readUInt16LE(48);
+  }
+  if (eShentsize === 0) return [];
+  const sections = [];
+  for (let i = 0; i < eShnum; i++) {
+    const base = eShoff + i * eShentsize;
+    if (base + eShentsize > data.length) break;
+    sections.push(
+      is64 ? {
+        type: data.readUInt32LE(base + 4),
+        offset: Number(data.readBigUInt64LE(base + 24)),
+        size: Number(data.readBigUInt64LE(base + 32)),
+        link: data.readUInt32LE(base + 40),
+        entsize: Number(data.readBigUInt64LE(base + 56))
+      } : {
+        type: data.readUInt32LE(base + 4),
+        offset: data.readUInt32LE(base + 16),
+        size: data.readUInt32LE(base + 20),
+        link: data.readUInt32LE(base + 24),
+        entsize: data.readUInt32LE(base + 36)
+      }
+    );
+  }
+  const dynsym = sections.find((s3) => s3.type === SHT_DYNSYM);
+  const dynstr = dynsym ? sections[dynsym.link] : void 0;
+  if (!dynsym || !dynstr) return [];
+  const entsize = dynsym.entsize || (is64 ? 24 : 16);
+  const count = Math.floor(dynsym.size / entsize);
+  const names = [];
+  for (let i = 0; i < count; i++) {
+    const symBase = dynsym.offset + i * entsize;
+    if (symBase + entsize > data.length) break;
+    const stName = data.readUInt32LE(symBase);
+    const stShndx = is64 ? data.readUInt16LE(symBase + 6) : data.readUInt16LE(symBase + 14);
+    if (stName === 0 || stShndx !== 0) continue;
+    const name = readCString(data, dynstr.offset + stName);
+    if (name) names.push(name);
+  }
+  return names;
+}
+var MH_MAGIC = 4277009102;
+var MH_MAGIC_64 = 4277009103;
+var FAT_MAGIC = 3405691582;
+var FAT_MAGIC_64 = 3405691583;
+var LC_SYMTAB = 2;
+var LC_DYSYMTAB = 11;
+var N_TYPE_MASK = 14;
+var N_UNDF = 0;
+function parseFatMachO(data, is64Arch) {
+  if (data.length < 8) return [];
+  const nfatArch = data.readUInt32BE(4);
+  const archEntrySize = is64Arch ? 32 : 20;
+  const names = [];
+  for (let i = 0; i < nfatArch; i++) {
+    const base = 8 + i * archEntrySize;
+    if (base + archEntrySize > data.length) break;
+    const offset = is64Arch ? Number(data.readBigUInt64BE(base + 8)) : data.readUInt32BE(base + 8);
+    const size = is64Arch ? Number(data.readBigUInt64BE(base + 16)) : data.readUInt32BE(base + 12);
+    if (size <= 0 || offset + size > data.length) continue;
+    names.push(...parseThinMachO(data, offset, offset + size));
+  }
+  return names;
+}
+function parseThinMachO(data, start, end) {
+  if (start + 4 > end) return [];
+  const magic = data.readUInt32LE(start);
+  if (magic !== MH_MAGIC && magic !== MH_MAGIC_64) return [];
+  const is64 = magic === MH_MAGIC_64;
+  const headerSize = is64 ? 32 : 28;
+  if (start + headerSize > end) return [];
+  const ncmds = data.readUInt32LE(start + 16);
+  let symtabOffset = -1;
+  let nsyms = 0;
+  let stroff = -1;
+  let iundefsym = -1;
+  let nundefsym = -1;
+  let cmdPtr = start + headerSize;
+  for (let i = 0; i < ncmds; i++) {
+    if (cmdPtr + 8 > end) break;
+    const cmd = data.readUInt32LE(cmdPtr);
+    const cmdsize = data.readUInt32LE(cmdPtr + 4);
+    if (cmdsize < 8 || cmdPtr + cmdsize > end) break;
+    if (cmd === LC_SYMTAB && cmdsize >= 24) {
+      symtabOffset = start + data.readUInt32LE(cmdPtr + 8);
+      nsyms = data.readUInt32LE(cmdPtr + 12);
+      stroff = start + data.readUInt32LE(cmdPtr + 16);
+    } else if (cmd === LC_DYSYMTAB && cmdsize >= 32) {
+      iundefsym = data.readUInt32LE(cmdPtr + 24);
+      nundefsym = data.readUInt32LE(cmdPtr + 28);
+    }
+    cmdPtr += cmdsize;
+  }
+  if (symtabOffset < 0 || stroff < 0) return [];
+  const nlistSize = is64 ? 16 : 12;
+  const hasDysymtab = iundefsym >= 0 && nundefsym >= 0;
+  const rangeStart = hasDysymtab ? iundefsym : 0;
+  const rangeCount = hasDysymtab ? nundefsym : nsyms;
+  const names = [];
+  for (let i = 0; i < rangeCount; i++) {
+    const idx = rangeStart + i;
+    if (idx >= nsyms) break;
+    const symBase = symtabOffset + idx * nlistSize;
+    if (symBase + nlistSize > end) break;
+    const nStrx = data.readUInt32LE(symBase);
+    const nType = data[symBase + 4];
+    if (!hasDysymtab && (nType & N_TYPE_MASK) !== N_UNDF) continue;
+    if (nStrx === 0) continue;
+    const name = readCString(data, stroff + nStrx);
+    if (!name) continue;
+    names.push(name.startsWith("_") ? name.slice(1) : name);
+  }
+  return names;
+}
+function parsePeImports(data) {
+  if (data.length < 64) return [];
+  const peOffset = data.readUInt32LE(60);
+  if (peOffset + 24 > data.length) return [];
+  if (data.readUInt32LE(peOffset) !== 17744) return [];
+  const numberOfSections = data.readUInt16LE(peOffset + 6);
+  const sizeOfOptionalHeader = data.readUInt16LE(peOffset + 20);
+  const optHeaderOffset = peOffset + 24;
+  if (sizeOfOptionalHeader === 0 || optHeaderOffset + sizeOfOptionalHeader > data.length) return [];
+  const magic = data.readUInt16LE(optHeaderOffset);
+  const isPe32Plus = magic === 523;
+  const importDirEntryOffset = optHeaderOffset + (isPe32Plus ? 112 : 96) + 8;
+  if (importDirEntryOffset + 8 > data.length) return [];
+  const importDirRva = data.readUInt32LE(importDirEntryOffset);
+  const importDirSize = data.readUInt32LE(importDirEntryOffset + 4);
+  if (importDirRva === 0 || importDirSize === 0) return [];
+  const sectionTableOffset = optHeaderOffset + sizeOfOptionalHeader;
+  const sections = [];
+  for (let i = 0; i < numberOfSections; i++) {
+    const base = sectionTableOffset + i * 40;
+    if (base + 40 > data.length) break;
+    sections.push({
+      va: data.readUInt32LE(base + 12),
+      size: data.readUInt32LE(base + 16),
+      rawOffset: data.readUInt32LE(base + 20)
+    });
+  }
+  const rvaToOffset = (rva) => {
+    for (const s3 of sections) {
+      if (rva >= s3.va && rva < s3.va + s3.size) return s3.rawOffset + (rva - s3.va);
+    }
+    return -1;
+  };
+  const names = [];
+  const seen = /* @__PURE__ */ new Set();
+  let descOffset = rvaToOffset(importDirRva);
+  const IMAGE_IMPORT_DESCRIPTOR_SIZE = 20;
+  let iterations = 0;
+  while (descOffset >= 0 && descOffset + IMAGE_IMPORT_DESCRIPTOR_SIZE <= data.length && iterations < 1e3) {
+    iterations++;
+    const originalFirstThunk = data.readUInt32LE(descOffset);
+    const nameRva = data.readUInt32LE(descOffset + 12);
+    const firstThunk = data.readUInt32LE(descOffset + 16);
+    if (originalFirstThunk === 0 && nameRva === 0 && firstThunk === 0) break;
+    const thunkRva = originalFirstThunk !== 0 ? originalFirstThunk : firstThunk;
+    let thunkOffset = rvaToOffset(thunkRva);
+    const entrySize = isPe32Plus ? 8 : 4;
+    const ordinalFlag = isPe32Plus ? 0x8000000000000000n : 2147483648;
+    while (thunkOffset >= 0 && thunkOffset + entrySize <= data.length) {
+      const entry = isPe32Plus ? data.readBigUInt64LE(thunkOffset) : BigInt(data.readUInt32LE(thunkOffset));
+      if (entry === 0n) break;
+      const isOrdinal = (entry & ordinalFlag) !== 0n;
+      if (!isOrdinal) {
+        const hintNameRva = Number(entry & 0x7fffffffn);
+        const hintNameOffset = rvaToOffset(hintNameRva);
+        if (hintNameOffset >= 0 && !seen.has(hintNameOffset)) {
+          seen.add(hintNameOffset);
+          const name = readCString(data, hintNameOffset + 2);
+          if (name) names.push(name);
+        }
+      }
+      thunkOffset += entrySize;
+    }
+    descOffset += IMAGE_IMPORT_DESCRIPTOR_SIZE;
+  }
+  return names;
+}
+
+// src/ecosystems/shared/binary-scan.ts
+var DANGEROUS_NATIVE_SYMBOLS = [
+  // Network
+  "socket",
+  "connect",
+  "bind",
+  "recv",
+  "recvfrom",
+  "send",
+  "sendto",
+  "sendmsg",
+  "getaddrinfo",
+  "gethostbyname",
+  "getnameinfo",
+  "getpeername",
+  // Process execution
+  "system",
+  "popen",
+  "execve",
+  "execl",
+  "execle",
+  "execlp",
+  "execvp",
+  "execvpe",
+  "fork",
+  "posix_spawn",
+  "posix_spawnp",
+  "CreateProcessA",
+  "CreateProcessW",
+  // Dynamic loading
+  "dlopen",
+  "dlsym",
+  "LoadLibraryA",
+  "LoadLibraryW",
+  "GetProcAddress",
+  // Privilege
+  "setuid",
+  "setgid",
+  "seteuid",
+  "setegid",
+  // Memory protection
+  "mprotect",
+  "VirtualProtect",
+  // File manipulation
+  "chmod",
+  "chown"
+];
+var SYMBOL_SET = new Set(DANGEROUS_NATIVE_SYMBOLS);
+var SUSPICIOUS_STRING_PATTERNS = [
+  // Sensitive system paths hardcoded in a binary are almost always malicious.
+  {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
+    regex: /\/etc\/(?:passwd|shadow|hosts|crontab|sudoers)/,
+    label: "binary:sensitive-path"
+  },
+  // Non-HTTP schemes have no legitimate reason to be hardcoded in a library binary:
+  // WebSocket (covert channel), DNS/UDP/TCP (tunnelling), SMTP/IMAP (email exfil),
+  // SOCKS (proxy pivoting), IRC (botnet C2), FTP.
+  {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
+    regex: /(?:wss?|dns|udp|tcp|smtps?|imaps?|socks[45]|ircs?|ftps?):\/\/[^\s"'<>\x00]{6,}/,
+    label: "binary:url-other-scheme"
+  },
+  // HTTP/HTTPS URLs appear in doc strings, SDK headers, and cert authority endpoints —
+  // worth surfacing but lower signal than exotic schemes.
+  {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
+    regex: /https?:\/\/[^\s"'<>\x00]{10,}/,
+    label: "binary:url-http"
+  },
+  // IPv6 addresses — often used for C2 to evade IPv4-centric blocklists.
+  // Requires at least 4 colon-separated hex groups to avoid matching short tokens.
+  {
+    regex: /(?:[0-9a-fA-F]{1,4}:){3,7}[0-9a-fA-F]{0,4}/,
+    label: "binary:ip-v6"
+  },
+  // IPv4 addresses.
+  {
+    regex: /\b(?:\d{1,3}\.){3}\d{1,3}\b/,
+    label: "binary:ip-v4"
+  },
+  // Temp directory paths.
+  {
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
+    regex: /\/tmp\/[^\s\x00]{3,}/,
+    label: "binary:tmppath"
+  },
+  // Long base64-like blobs — low signal in isolation; common in crypto libs as constants,
+  // OIDs, and test vectors.
+  {
+    regex: /[A-Za-z0-9+/]{48,}={0,2}/,
+    label: "binary:base64"
+  }
+];
+var HIGH_ENTROPY_THRESHOLD = 7.2;
+var SYMBOL_COUNT_RATIO_THRESHOLD = 5;
+var SYMBOL_COUNT_ABS_THRESHOLD = 5;
+function extractStrings(data, minLen = 6) {
+  const result = [];
+  let start = -1;
+  for (let i = 0; i < data.length; i++) {
+    const b2 = data[i];
+    if (b2 >= 32 && b2 < 127) {
+      if (start === -1) start = i;
+    } else {
+      if (start !== -1 && i - start >= minLen) {
+        result.push(data.subarray(start, i).toString("ascii"));
+      }
+      start = -1;
+    }
+  }
+  if (start !== -1 && data.length - start >= minLen) {
+    result.push(data.subarray(start).toString("ascii"));
+  }
+  return result;
+}
+function shannonEntropy(data) {
+  if (data.length === 0) return 0;
+  const freq = new Uint32Array(256);
+  for (let i = 0; i < data.length; i++) freq[data[i]]++;
+  let entropy = 0;
+  for (let i = 0; i < 256; i++) {
+    if (freq[i] > 0) {
+      const p2 = freq[i] / data.length;
+      entropy -= p2 * Math.log2(p2);
+    }
+  }
+  return entropy;
+}
+function scanBinary(filename, data) {
+  const strings = extractStrings(data);
+  const symbolCounts = {};
+  for (const sym of extractImportedSymbols(data)) {
+    if (SYMBOL_SET.has(sym)) {
+      symbolCounts[sym] = (symbolCounts[sym] ?? 0) + 1;
+    }
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const suspiciousStrings = [];
+  for (const s3 of strings) {
+    if (seen.has(s3)) continue;
+    for (const { regex, label } of SUSPICIOUS_STRING_PATTERNS) {
+      if (regex.test(s3)) {
+        seen.add(s3);
+        suspiciousStrings.push({ text: s3, label });
+        break;
+      }
+    }
+    if (suspiciousStrings.length >= 50) break;
+  }
+  return { filename, symbolCounts, suspiciousStrings, entropy: shannonEntropy(data) };
+}
+function binaryFindingsDelta(oldScans, newScans) {
+  const findings = [];
+  for (const [filename, newScan] of newScans) {
+    const oldScan = oldScans.get(filename);
+    if (newScan.entropy >= HIGH_ENTROPY_THRESHOLD) {
+      const oldEntropy = oldScan?.entropy;
+      if (oldEntropy === void 0 || newScan.entropy > oldEntropy + 0.3) {
+        findings.push({
+          file: filename,
+          label: "binary:high-entropy",
+          detail: oldEntropy !== void 0 ? `entropy ${oldEntropy.toFixed(2)} \u2192 ${newScan.entropy.toFixed(2)}` : `entropy ${newScan.entropy.toFixed(2)} (new file)`
+        });
+      }
+    }
+    const oldCounts = oldScan?.symbolCounts ?? {};
+    for (const [sym, newCount] of Object.entries(newScan.symbolCounts)) {
+      const oldCount = oldCounts[sym] ?? 0;
+      if (newCount <= oldCount) continue;
+      const isNew = oldCount === 0;
+      const absIncrease = newCount - oldCount;
+      const ratioExceeded = oldCount > 0 && newCount / oldCount >= SYMBOL_COUNT_RATIO_THRESHOLD;
+      if (isNew || absIncrease >= SYMBOL_COUNT_ABS_THRESHOLD || ratioExceeded) {
+        findings.push({
+          file: filename,
+          label: `native:${sym}`,
+          detail: isNew ? `new symbol (count: ${newCount})` : `count: ${oldCount} \u2192 ${newCount}`
+        });
+      }
+    }
+    const oldStrSet = new Set(oldScan?.suspiciousStrings.map((s3) => s3.text) ?? []);
+    for (const { text, label } of newScan.suspiciousStrings) {
+      if (!oldStrSet.has(text)) {
+        findings.push({
+          file: filename,
+          label,
+          detail: text.length > 100 ? `${text.slice(0, 100)}\u2026` : text
+        });
+      }
+    }
+  }
+  return findings;
 }
 
 // node_modules/.pnpm/diff@9.0.0/node_modules/diff/libesm/diff/base.js
@@ -31290,6 +31715,14 @@ var NPM_EXTENSIONS = /* @__PURE__ */ new Set([".js", ".mjs", ".cjs"]);
 var JSR_EXTENSIONS = /* @__PURE__ */ new Set([".ts", ".tsx", ".js", ".mjs", ".jsx"]);
 
 // src/ecosystems/deno/index.ts
+async function scanNpmArtifact(data, destDir) {
+  const files = await extractTarball(data, destDir, NPM_EXTENSIONS);
+  const binaries = await extractTarballBinaries(destDir);
+  const binaryScans = new Map(
+    [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)])
+  );
+  return { files, binaryScans };
+}
 var DenoAnalyzer = class {
   ecosystem = "deno";
   async analyzeChange(change, options) {
@@ -31330,11 +31763,7 @@ var DenoAnalyzer = class {
   async analyzeNpm(base, name, changeType, oldVersion, newVersion, options, registryCheck) {
     const safeName = name.replace(/\//g, "__");
     const download = (version, slot) => (url) => downloadNpmTarball(url).then(
-      (data) => extractTarball(
-        data,
-        (0, import_node_path12.join)(options.tmpDir, `deno_npm_${safeName}_${version}_${slot}`),
-        NPM_EXTENSIONS
-      )
+      (data) => scanNpmArtifact(data, (0, import_node_path12.join)(options.tmpDir, `deno_npm_${safeName}_${version}_${slot}`))
     );
     if (changeType === "removed") {
       return {
@@ -31348,13 +31777,14 @@ var DenoAnalyzer = class {
       const newMeta2 = await fetchNpmVersion(name, newVersion);
       const newArtifact2 = getArtifactInfo(newMeta2);
       const repoUrl2 = extractRepoUrl(newMeta2);
-      const [newFiles2, registryInfo, repoCheck2] = await Promise.all([
+      const [newScan2, registryInfo, repoCheck2] = await Promise.all([
         download(newVersion, "new")(newArtifact2.url),
         extractRegistryInfo(newMeta2),
         checkRepoRelease({ repoUrl: repoUrl2, packageName: name, oldVersion: null, newVersion })
       ]);
-      const newFindings2 = scanPatterns(newFiles2, DANGEROUS_PATTERNS2);
-      const newHooks = detectNpmHooks(newFiles2);
+      const newFindings2 = scanPatterns(newScan2.files, DANGEROUS_PATTERNS2);
+      const newHooks = detectNpmHooks(newScan2.files);
+      const binaryDelta2 = binaryFindingsDelta(/* @__PURE__ */ new Map(), newScan2.binaryScans);
       return {
         ...base,
         oldVersion: null,
@@ -31371,6 +31801,7 @@ var DenoAnalyzer = class {
           delta: newFindings2,
           platformDivergence: false
         },
+        ...binaryDelta2.length > 0 && { binaryFindings: { delta: binaryDelta2 } },
         ...newHooks.length > 0 && { installHooks: newHooks.map((h) => ({ ...h, isNew: true })) },
         ...repoCheck2 && { repoCheck: repoCheck2 },
         ...registryCheck && { registryCheck }
@@ -31383,14 +31814,15 @@ var DenoAnalyzer = class {
     const newArtifact = getArtifactInfo(newMeta);
     const oldArtifact = getArtifactInfo(oldMeta);
     const repoUrl = extractRepoUrl(newMeta);
-    const [newFiles, oldFiles, repoCheck] = await Promise.all([
+    const [newScan, oldScan, repoCheck] = await Promise.all([
       download(newVersion, "new")(newArtifact.url),
       download(oldVersion, "old")(oldArtifact.url),
       checkRepoRelease({ repoUrl, packageName: name, oldVersion, newVersion })
     ]);
-    const newFindings = scanPatterns(newFiles, DANGEROUS_PATTERNS2);
-    const oldFindings = scanPatterns(oldFiles, DANGEROUS_PATTERNS2);
-    const annotated = annotateHooks(detectNpmHooks(oldFiles), detectNpmHooks(newFiles));
+    const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS2);
+    const oldFindings = scanPatterns(oldScan.files, DANGEROUS_PATTERNS2);
+    const annotated = annotateHooks(detectNpmHooks(oldScan.files), detectNpmHooks(newScan.files));
+    const binaryDelta = binaryFindingsDelta(oldScan.binaryScans, newScan.binaryScans);
     const metadataDelta = computeMetadataDelta(oldMeta, newMeta);
     return {
       ...base,
@@ -31402,13 +31834,14 @@ var DenoAnalyzer = class {
         newArtifacts: [newArtifact]
       },
       metadataDelta,
-      codeDelta: diffFiles(oldFiles, newFiles),
+      codeDelta: diffFiles(oldScan.files, newScan.files),
       securityFindings: {
         old: oldFindings,
         new: newFindings,
         delta: findingsDelta(oldFindings, newFindings),
         platformDivergence: false
       },
+      ...binaryDelta.length > 0 && { binaryFindings: { delta: binaryDelta } },
       ...annotated.length > 0 && { installHooks: annotated },
       ...repoCheck && { repoCheck },
       ...registryCheck && { registryCheck }
@@ -31532,6 +31965,14 @@ function checkNpmNativeBuild(oldFiles, newFiles) {
   }
   return false;
 }
+async function scanNpmArtifact2(data, destDir) {
+  const files = await extractTarball(data, destDir, JS_EXTENSIONS);
+  const binaries = await extractTarballBinaries(destDir);
+  const binaryScans = new Map(
+    [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)])
+  );
+  return { files, binaryScans };
+}
 var JavaScriptAnalyzer = class {
   ecosystem = "javascript";
   async analyzeChange(change, options) {
@@ -31554,19 +31995,20 @@ var JavaScriptAnalyzer = class {
       };
     }
     const download = (version, slot) => (url) => downloadNpmTarball(url).then(
-      (data) => extractTarball(data, (0, import_node_path13.join)(options.tmpDir, `${safeName}_${version}_${slot}`), JS_EXTENSIONS)
+      (data) => scanNpmArtifact2(data, (0, import_node_path13.join)(options.tmpDir, `${safeName}_${version}_${slot}`))
     );
     if (change_type === "added") {
       const newMeta2 = await fetchNpmVersion(name, new_version);
       const newArtifact2 = getArtifactInfo(newMeta2);
       const repoUrl2 = extractRepoUrl(newMeta2);
-      const [newFiles2, registryInfo, repoCheck2] = await Promise.all([
+      const [newScan2, registryInfo, repoCheck2] = await Promise.all([
         download(new_version, "new")(newArtifact2.url),
         extractRegistryInfo(newMeta2),
         checkRepoRelease({ repoUrl: repoUrl2, packageName: name, oldVersion: null, newVersion: new_version })
       ]);
-      const newFindings2 = scanPatterns(newFiles2, DANGEROUS_PATTERNS);
-      const newHooks = detectNpmHooks(newFiles2);
+      const newFindings2 = scanPatterns(newScan2.files, DANGEROUS_PATTERNS);
+      const newHooks = detectNpmHooks(newScan2.files);
+      const binaryDelta2 = binaryFindingsDelta(/* @__PURE__ */ new Map(), newScan2.binaryScans);
       return {
         ...base,
         oldVersion: null,
@@ -31583,6 +32025,7 @@ var JavaScriptAnalyzer = class {
           delta: newFindings2,
           platformDivergence: false
         },
+        ...binaryDelta2.length > 0 && { binaryFindings: { delta: binaryDelta2 } },
         ...newHooks.length > 0 && { installHooks: newHooks.map((h) => ({ ...h, isNew: true })) },
         ...repoCheck2 && { repoCheck: repoCheck2 },
         ...registryCheck && { registryCheck }
@@ -31595,7 +32038,7 @@ var JavaScriptAnalyzer = class {
     const newArtifact = getArtifactInfo(newMeta);
     const oldArtifact = getArtifactInfo(oldMeta);
     const repoUrl = extractRepoUrl(newMeta);
-    const [newFiles, oldFiles, repoCheck] = await Promise.all([
+    const [newScan, oldScan, repoCheck] = await Promise.all([
       download(new_version, "new")(newArtifact.url),
       download(old_version, "old")(oldArtifact.url),
       checkRepoRelease({
@@ -31605,10 +32048,11 @@ var JavaScriptAnalyzer = class {
         newVersion: new_version
       })
     ]);
-    const newFindings = scanPatterns(newFiles, DANGEROUS_PATTERNS);
-    const oldFindings = scanPatterns(oldFiles, DANGEROUS_PATTERNS);
-    const annotated = annotateHooks(detectNpmHooks(oldFiles), detectNpmHooks(newFiles));
-    const buildSystemChanged = checkNpmNativeBuild(oldFiles, newFiles);
+    const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS);
+    const oldFindings = scanPatterns(oldScan.files, DANGEROUS_PATTERNS);
+    const annotated = annotateHooks(detectNpmHooks(oldScan.files), detectNpmHooks(newScan.files));
+    const binaryDelta = binaryFindingsDelta(oldScan.binaryScans, newScan.binaryScans);
+    const buildSystemChanged = checkNpmNativeBuild(oldScan.files, newScan.files);
     const baseDelta = computeMetadataDelta(oldMeta, newMeta);
     const metadataDelta = { ...baseDelta, ...buildSystemChanged && { buildSystemChanged } };
     return {
@@ -31621,13 +32065,14 @@ var JavaScriptAnalyzer = class {
         newArtifacts: [newArtifact]
       },
       metadataDelta,
-      codeDelta: diffFiles(oldFiles, newFiles),
+      codeDelta: diffFiles(oldScan.files, newScan.files),
       securityFindings: {
         old: oldFindings,
         new: newFindings,
         delta: findingsDelta(oldFindings, newFindings),
         platformDivergence: false
       },
+      ...binaryDelta.length > 0 && { binaryFindings: { delta: binaryDelta } },
       ...annotated.length > 0 && { installHooks: annotated },
       ...repoCheck && { repoCheck },
       ...registryCheck && { registryCheck }
@@ -31913,425 +32358,6 @@ var PhpAnalyzer = class {
 
 // src/ecosystems/python/index.ts
 var import_node_path14 = require("path");
-
-// src/ecosystems/python/binary-formats.ts
-function extractImportedSymbols(data) {
-  try {
-    if (data.length < 4) return [];
-    const magic = data.readUInt32LE(0);
-    if (magic === ELF_MAGIC) return parseElfImports(data);
-    if (magic === MH_MAGIC || magic === MH_MAGIC_64) return parseThinMachO(data, 0, data.length);
-    const fatMagic = data.readUInt32BE(0);
-    if (fatMagic === FAT_MAGIC || fatMagic === FAT_MAGIC_64) {
-      return parseFatMachO(data, fatMagic === FAT_MAGIC_64);
-    }
-    if (data[0] === 77 && data[1] === 90) return parsePeImports(data);
-    return [];
-  } catch {
-    return [];
-  }
-}
-function readCString(data, offset) {
-  if (offset < 0 || offset >= data.length) return "";
-  let end = offset;
-  while (end < data.length && data[end] !== 0) end++;
-  return data.subarray(offset, end).toString("ascii");
-}
-var ELF_MAGIC = 1179403647;
-var SHT_DYNSYM = 11;
-function parseElfImports(data) {
-  if (data.length < 20) return [];
-  const eiClass = data[4];
-  const eiData = data[5];
-  if (eiData !== 1) return [];
-  const is64 = eiClass === 2;
-  let eShoff;
-  let eShentsize;
-  let eShnum;
-  if (is64) {
-    if (data.length < 64) return [];
-    eShoff = Number(data.readBigUInt64LE(40));
-    eShentsize = data.readUInt16LE(58);
-    eShnum = data.readUInt16LE(60);
-  } else {
-    if (data.length < 52) return [];
-    eShoff = data.readUInt32LE(32);
-    eShentsize = data.readUInt16LE(46);
-    eShnum = data.readUInt16LE(48);
-  }
-  if (eShentsize === 0) return [];
-  const sections = [];
-  for (let i = 0; i < eShnum; i++) {
-    const base = eShoff + i * eShentsize;
-    if (base + eShentsize > data.length) break;
-    sections.push(
-      is64 ? {
-        type: data.readUInt32LE(base + 4),
-        offset: Number(data.readBigUInt64LE(base + 24)),
-        size: Number(data.readBigUInt64LE(base + 32)),
-        link: data.readUInt32LE(base + 40),
-        entsize: Number(data.readBigUInt64LE(base + 56))
-      } : {
-        type: data.readUInt32LE(base + 4),
-        offset: data.readUInt32LE(base + 16),
-        size: data.readUInt32LE(base + 20),
-        link: data.readUInt32LE(base + 24),
-        entsize: data.readUInt32LE(base + 36)
-      }
-    );
-  }
-  const dynsym = sections.find((s3) => s3.type === SHT_DYNSYM);
-  const dynstr = dynsym ? sections[dynsym.link] : void 0;
-  if (!dynsym || !dynstr) return [];
-  const entsize = dynsym.entsize || (is64 ? 24 : 16);
-  const count = Math.floor(dynsym.size / entsize);
-  const names = [];
-  for (let i = 0; i < count; i++) {
-    const symBase = dynsym.offset + i * entsize;
-    if (symBase + entsize > data.length) break;
-    const stName = data.readUInt32LE(symBase);
-    const stShndx = is64 ? data.readUInt16LE(symBase + 6) : data.readUInt16LE(symBase + 14);
-    if (stName === 0 || stShndx !== 0) continue;
-    const name = readCString(data, dynstr.offset + stName);
-    if (name) names.push(name);
-  }
-  return names;
-}
-var MH_MAGIC = 4277009102;
-var MH_MAGIC_64 = 4277009103;
-var FAT_MAGIC = 3405691582;
-var FAT_MAGIC_64 = 3405691583;
-var LC_SYMTAB = 2;
-var LC_DYSYMTAB = 11;
-var N_TYPE_MASK = 14;
-var N_UNDF = 0;
-function parseFatMachO(data, is64Arch) {
-  if (data.length < 8) return [];
-  const nfatArch = data.readUInt32BE(4);
-  const archEntrySize = is64Arch ? 32 : 20;
-  const names = [];
-  for (let i = 0; i < nfatArch; i++) {
-    const base = 8 + i * archEntrySize;
-    if (base + archEntrySize > data.length) break;
-    const offset = is64Arch ? Number(data.readBigUInt64BE(base + 8)) : data.readUInt32BE(base + 8);
-    const size = is64Arch ? Number(data.readBigUInt64BE(base + 16)) : data.readUInt32BE(base + 12);
-    if (size <= 0 || offset + size > data.length) continue;
-    names.push(...parseThinMachO(data, offset, offset + size));
-  }
-  return names;
-}
-function parseThinMachO(data, start, end) {
-  if (start + 4 > end) return [];
-  const magic = data.readUInt32LE(start);
-  if (magic !== MH_MAGIC && magic !== MH_MAGIC_64) return [];
-  const is64 = magic === MH_MAGIC_64;
-  const headerSize = is64 ? 32 : 28;
-  if (start + headerSize > end) return [];
-  const ncmds = data.readUInt32LE(start + 16);
-  let symtabOffset = -1;
-  let nsyms = 0;
-  let stroff = -1;
-  let iundefsym = -1;
-  let nundefsym = -1;
-  let cmdPtr = start + headerSize;
-  for (let i = 0; i < ncmds; i++) {
-    if (cmdPtr + 8 > end) break;
-    const cmd = data.readUInt32LE(cmdPtr);
-    const cmdsize = data.readUInt32LE(cmdPtr + 4);
-    if (cmdsize < 8 || cmdPtr + cmdsize > end) break;
-    if (cmd === LC_SYMTAB && cmdsize >= 24) {
-      symtabOffset = start + data.readUInt32LE(cmdPtr + 8);
-      nsyms = data.readUInt32LE(cmdPtr + 12);
-      stroff = start + data.readUInt32LE(cmdPtr + 16);
-    } else if (cmd === LC_DYSYMTAB && cmdsize >= 32) {
-      iundefsym = data.readUInt32LE(cmdPtr + 24);
-      nundefsym = data.readUInt32LE(cmdPtr + 28);
-    }
-    cmdPtr += cmdsize;
-  }
-  if (symtabOffset < 0 || stroff < 0) return [];
-  const nlistSize = is64 ? 16 : 12;
-  const hasDysymtab = iundefsym >= 0 && nundefsym >= 0;
-  const rangeStart = hasDysymtab ? iundefsym : 0;
-  const rangeCount = hasDysymtab ? nundefsym : nsyms;
-  const names = [];
-  for (let i = 0; i < rangeCount; i++) {
-    const idx = rangeStart + i;
-    if (idx >= nsyms) break;
-    const symBase = symtabOffset + idx * nlistSize;
-    if (symBase + nlistSize > end) break;
-    const nStrx = data.readUInt32LE(symBase);
-    const nType = data[symBase + 4];
-    if (!hasDysymtab && (nType & N_TYPE_MASK) !== N_UNDF) continue;
-    if (nStrx === 0) continue;
-    const name = readCString(data, stroff + nStrx);
-    if (!name) continue;
-    names.push(name.startsWith("_") ? name.slice(1) : name);
-  }
-  return names;
-}
-function parsePeImports(data) {
-  if (data.length < 64) return [];
-  const peOffset = data.readUInt32LE(60);
-  if (peOffset + 24 > data.length) return [];
-  if (data.readUInt32LE(peOffset) !== 17744) return [];
-  const numberOfSections = data.readUInt16LE(peOffset + 6);
-  const sizeOfOptionalHeader = data.readUInt16LE(peOffset + 20);
-  const optHeaderOffset = peOffset + 24;
-  if (sizeOfOptionalHeader === 0 || optHeaderOffset + sizeOfOptionalHeader > data.length) return [];
-  const magic = data.readUInt16LE(optHeaderOffset);
-  const isPe32Plus = magic === 523;
-  const importDirEntryOffset = optHeaderOffset + (isPe32Plus ? 112 : 96) + 8;
-  if (importDirEntryOffset + 8 > data.length) return [];
-  const importDirRva = data.readUInt32LE(importDirEntryOffset);
-  const importDirSize = data.readUInt32LE(importDirEntryOffset + 4);
-  if (importDirRva === 0 || importDirSize === 0) return [];
-  const sectionTableOffset = optHeaderOffset + sizeOfOptionalHeader;
-  const sections = [];
-  for (let i = 0; i < numberOfSections; i++) {
-    const base = sectionTableOffset + i * 40;
-    if (base + 40 > data.length) break;
-    sections.push({
-      va: data.readUInt32LE(base + 12),
-      size: data.readUInt32LE(base + 16),
-      rawOffset: data.readUInt32LE(base + 20)
-    });
-  }
-  const rvaToOffset = (rva) => {
-    for (const s3 of sections) {
-      if (rva >= s3.va && rva < s3.va + s3.size) return s3.rawOffset + (rva - s3.va);
-    }
-    return -1;
-  };
-  const names = [];
-  const seen = /* @__PURE__ */ new Set();
-  let descOffset = rvaToOffset(importDirRva);
-  const IMAGE_IMPORT_DESCRIPTOR_SIZE = 20;
-  let iterations = 0;
-  while (descOffset >= 0 && descOffset + IMAGE_IMPORT_DESCRIPTOR_SIZE <= data.length && iterations < 1e3) {
-    iterations++;
-    const originalFirstThunk = data.readUInt32LE(descOffset);
-    const nameRva = data.readUInt32LE(descOffset + 12);
-    const firstThunk = data.readUInt32LE(descOffset + 16);
-    if (originalFirstThunk === 0 && nameRva === 0 && firstThunk === 0) break;
-    const thunkRva = originalFirstThunk !== 0 ? originalFirstThunk : firstThunk;
-    let thunkOffset = rvaToOffset(thunkRva);
-    const entrySize = isPe32Plus ? 8 : 4;
-    const ordinalFlag = isPe32Plus ? 0x8000000000000000n : 2147483648;
-    while (thunkOffset >= 0 && thunkOffset + entrySize <= data.length) {
-      const entry = isPe32Plus ? data.readBigUInt64LE(thunkOffset) : BigInt(data.readUInt32LE(thunkOffset));
-      if (entry === 0n) break;
-      const isOrdinal = (entry & ordinalFlag) !== 0n;
-      if (!isOrdinal) {
-        const hintNameRva = Number(entry & 0x7fffffffn);
-        const hintNameOffset = rvaToOffset(hintNameRva);
-        if (hintNameOffset >= 0 && !seen.has(hintNameOffset)) {
-          seen.add(hintNameOffset);
-          const name = readCString(data, hintNameOffset + 2);
-          if (name) names.push(name);
-        }
-      }
-      thunkOffset += entrySize;
-    }
-    descOffset += IMAGE_IMPORT_DESCRIPTOR_SIZE;
-  }
-  return names;
-}
-
-// src/ecosystems/python/binary-scan.ts
-var DANGEROUS_NATIVE_SYMBOLS = [
-  // Network
-  "socket",
-  "connect",
-  "bind",
-  "recv",
-  "recvfrom",
-  "send",
-  "sendto",
-  "sendmsg",
-  "getaddrinfo",
-  "gethostbyname",
-  "getnameinfo",
-  "getpeername",
-  // Process execution
-  "system",
-  "popen",
-  "execve",
-  "execl",
-  "execle",
-  "execlp",
-  "execvp",
-  "execvpe",
-  "fork",
-  "posix_spawn",
-  "posix_spawnp",
-  "CreateProcessA",
-  "CreateProcessW",
-  // Dynamic loading
-  "dlopen",
-  "dlsym",
-  "LoadLibraryA",
-  "LoadLibraryW",
-  "GetProcAddress",
-  // Privilege
-  "setuid",
-  "setgid",
-  "seteuid",
-  "setegid",
-  // Memory protection
-  "mprotect",
-  "VirtualProtect",
-  // File manipulation
-  "chmod",
-  "chown"
-];
-var SYMBOL_SET = new Set(DANGEROUS_NATIVE_SYMBOLS);
-var SUSPICIOUS_STRING_PATTERNS = [
-  // Sensitive system paths hardcoded in a binary are almost always malicious.
-  {
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
-    regex: /\/etc\/(?:passwd|shadow|hosts|crontab|sudoers)/,
-    label: "binary:sensitive-path"
-  },
-  // Non-HTTP schemes have no legitimate reason to be hardcoded in a library binary:
-  // WebSocket (covert channel), DNS/UDP/TCP (tunnelling), SMTP/IMAP (email exfil),
-  // SOCKS (proxy pivoting), IRC (botnet C2), FTP.
-  {
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
-    regex: /(?:wss?|dns|udp|tcp|smtps?|imaps?|socks[45]|ircs?|ftps?):\/\/[^\s"'<>\x00]{6,}/,
-    label: "binary:url-other-scheme"
-  },
-  // HTTP/HTTPS URLs appear in doc strings, SDK headers, and cert authority endpoints —
-  // worth surfacing but lower signal than exotic schemes.
-  {
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
-    regex: /https?:\/\/[^\s"'<>\x00]{10,}/,
-    label: "binary:url-http"
-  },
-  // IPv6 addresses — often used for C2 to evade IPv4-centric blocklists.
-  // Requires at least 4 colon-separated hex groups to avoid matching short tokens.
-  {
-    regex: /(?:[0-9a-fA-F]{1,4}:){3,7}[0-9a-fA-F]{0,4}/,
-    label: "binary:ip-v6"
-  },
-  // IPv4 addresses.
-  {
-    regex: /\b(?:\d{1,3}\.){3}\d{1,3}\b/,
-    label: "binary:ip-v4"
-  },
-  // Temp directory paths.
-  {
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
-    regex: /\/tmp\/[^\s\x00]{3,}/,
-    label: "binary:tmppath"
-  },
-  // Long base64-like blobs — low signal in isolation; common in crypto libs as constants,
-  // OIDs, and test vectors.
-  {
-    regex: /[A-Za-z0-9+/]{48,}={0,2}/,
-    label: "binary:base64"
-  }
-];
-var HIGH_ENTROPY_THRESHOLD = 7.2;
-var SYMBOL_COUNT_RATIO_THRESHOLD = 5;
-var SYMBOL_COUNT_ABS_THRESHOLD = 5;
-function extractStrings(data, minLen = 6) {
-  const result = [];
-  let start = -1;
-  for (let i = 0; i < data.length; i++) {
-    const b2 = data[i];
-    if (b2 >= 32 && b2 < 127) {
-      if (start === -1) start = i;
-    } else {
-      if (start !== -1 && i - start >= minLen) {
-        result.push(data.subarray(start, i).toString("ascii"));
-      }
-      start = -1;
-    }
-  }
-  if (start !== -1 && data.length - start >= minLen) {
-    result.push(data.subarray(start).toString("ascii"));
-  }
-  return result;
-}
-function shannonEntropy(data) {
-  if (data.length === 0) return 0;
-  const freq = new Uint32Array(256);
-  for (let i = 0; i < data.length; i++) freq[data[i]]++;
-  let entropy = 0;
-  for (let i = 0; i < 256; i++) {
-    if (freq[i] > 0) {
-      const p2 = freq[i] / data.length;
-      entropy -= p2 * Math.log2(p2);
-    }
-  }
-  return entropy;
-}
-function scanBinary(filename, data) {
-  const strings = extractStrings(data);
-  const symbolCounts = {};
-  for (const sym of extractImportedSymbols(data)) {
-    if (SYMBOL_SET.has(sym)) {
-      symbolCounts[sym] = (symbolCounts[sym] ?? 0) + 1;
-    }
-  }
-  const seen = /* @__PURE__ */ new Set();
-  const suspiciousStrings = [];
-  for (const s3 of strings) {
-    if (seen.has(s3)) continue;
-    for (const { regex, label } of SUSPICIOUS_STRING_PATTERNS) {
-      if (regex.test(s3)) {
-        seen.add(s3);
-        suspiciousStrings.push({ text: s3, label });
-        break;
-      }
-    }
-    if (suspiciousStrings.length >= 50) break;
-  }
-  return { filename, symbolCounts, suspiciousStrings, entropy: shannonEntropy(data) };
-}
-function binaryFindingsDelta(oldScans, newScans) {
-  const findings = [];
-  for (const [filename, newScan] of newScans) {
-    const oldScan = oldScans.get(filename);
-    if (newScan.entropy >= HIGH_ENTROPY_THRESHOLD) {
-      const oldEntropy = oldScan?.entropy;
-      if (oldEntropy === void 0 || newScan.entropy > oldEntropy + 0.3) {
-        findings.push({
-          file: filename,
-          label: "binary:high-entropy",
-          detail: oldEntropy !== void 0 ? `entropy ${oldEntropy.toFixed(2)} \u2192 ${newScan.entropy.toFixed(2)}` : `entropy ${newScan.entropy.toFixed(2)} (new file)`
-        });
-      }
-    }
-    const oldCounts = oldScan?.symbolCounts ?? {};
-    for (const [sym, newCount] of Object.entries(newScan.symbolCounts)) {
-      const oldCount = oldCounts[sym] ?? 0;
-      if (newCount <= oldCount) continue;
-      const isNew = oldCount === 0;
-      const absIncrease = newCount - oldCount;
-      const ratioExceeded = oldCount > 0 && newCount / oldCount >= SYMBOL_COUNT_RATIO_THRESHOLD;
-      if (isNew || absIncrease >= SYMBOL_COUNT_ABS_THRESHOLD || ratioExceeded) {
-        findings.push({
-          file: filename,
-          label: `native:${sym}`,
-          detail: isNew ? `new symbol (count: ${newCount})` : `count: ${oldCount} \u2192 ${newCount}`
-        });
-      }
-    }
-    const oldStrSet = new Set(oldScan?.suspiciousStrings.map((s3) => s3.text) ?? []);
-    for (const { text, label } of newScan.suspiciousStrings) {
-      if (!oldStrSet.has(text)) {
-        findings.push({
-          file: filename,
-          label,
-          detail: text.length > 100 ? `${text.slice(0, 100)}\u2026` : text
-        });
-      }
-    }
-  }
-  return findings;
-}
 
 // src/ecosystems/python/patterns.ts
 var DANGEROUS_PATTERNS4 = [

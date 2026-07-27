@@ -8,12 +8,12 @@ import {
   type FileMap,
 } from '../../utils/extract.js';
 import type { AnalysisOptions, EcosystemAnalyzer } from '../base.js';
+import { type BinaryScan, binaryFindingsDelta, scanBinary } from '../shared/binary-scan.js';
 import { diffFiles } from '../shared/diff.js';
 import { annotateHooks, detectPythonWheelHooks } from '../shared/install-hooks.js';
 import { checkRegistry } from '../shared/registry-check.js';
 import { checkRepoRelease } from '../shared/repo-check.js';
 import { findingsDelta, scanPatterns } from '../shared/scan.js';
-import { type BinaryScan, binaryFindingsDelta, scanBinary } from './binary-scan.js';
 import { DANGEROUS_PATTERNS, PY_EXTENSIONS } from './patterns.js';
 import {
   computeMetadataDelta,
