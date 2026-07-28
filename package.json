@@ -1,6 +1,6 @@
 {
   "name": "lockscan",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Security analysis of lockfile changes across ecosystems — consumes lockdelta output",
   "type": "module",
   "main": "./dist/index.js",
