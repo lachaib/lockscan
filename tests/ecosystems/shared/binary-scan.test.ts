@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { binaryFindingsDelta, scanBinary } from '../../../src/ecosystems/python/binary-scan.js';
+import { binaryFindingsDelta, scanBinary } from '../../../src/ecosystems/shared/binary-scan.js';
 import { buildElf, buildMachO } from './binary-fixtures.js';
 
 describe('scanBinary — native symbol detection (issue #4)', () => {

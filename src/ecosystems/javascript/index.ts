@@ -2,8 +2,9 @@ import { join } from 'node:path';
 import type { PackageChange } from 'lockdelta';
 import type { PackageAnalysis } from '../../types.js';
 import type { FileMap } from '../../utils/extract.js';
-import { extractTarball } from '../../utils/extract.js';
+import { extractTarball, extractTarballBinaries } from '../../utils/extract.js';
 import type { AnalysisOptions, EcosystemAnalyzer } from '../base.js';
+import { type BinaryScan, binaryFindingsDelta, scanBinary } from '../shared/binary-scan.js';
 import { diffFiles } from '../shared/diff.js';
 import { findingsDelta, scanPatterns } from '../shared/scan.js';
 
@@ -33,6 +34,20 @@ import {
 } from './npm.js';
 import { DANGEROUS_PATTERNS, JS_EXTENSIONS } from './patterns.js';
 
+interface NpmArtifactScan {
+  files: FileMap;
+  binaryScans: Map<string, BinaryScan>;
+}
+
+async function scanNpmArtifact(data: Buffer, destDir: string): Promise<NpmArtifactScan> {
+  const files = await extractTarball(data, destDir, JS_EXTENSIONS);
+  const binaries = await extractTarballBinaries(destDir);
+  const binaryScans = new Map(
+    [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)]),
+  );
+  return { files, binaryScans };
+}
+
 export class JavaScriptAnalyzer implements EcosystemAnalyzer {
   readonly ecosystem = 'javascript';
 
@@ -60,7 +75,7 @@ export class JavaScriptAnalyzer implements EcosystemAnalyzer {
 
     const download = (version: string, slot: string) => (url: string) =>
       downloadNpmTarball(url).then((data) =>
-        extractTarball(data, join(options.tmpDir, `${safeName}_${version}_${slot}`), JS_EXTENSIONS),
+        scanNpmArtifact(data, join(options.tmpDir, `${safeName}_${version}_${slot}`)),
       );
 
     if (change_type === 'added') {
@@ -69,14 +84,15 @@ export class JavaScriptAnalyzer implements EcosystemAnalyzer {
       const repoUrl = extractRepoUrl(newMeta);
 
       // tarball download+extract, registry info, and repo check are all independent network I/O
-      const [newFiles, registryInfo, repoCheck] = await Promise.all([
+      const [newScan, registryInfo, repoCheck] = await Promise.all([
         download(new_version!, 'new')(newArtifact.url),
         extractRegistryInfo(newMeta),
         checkRepoRelease({ repoUrl, packageName: name, oldVersion: null, newVersion: new_version }),
       ]);
 
-      const newFindings = scanPatterns(newFiles, DANGEROUS_PATTERNS);
-      const newHooks = detectNpmHooks(newFiles);
+      const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS);
+      const newHooks = detectNpmHooks(newScan.files);
+      const binaryDelta = binaryFindingsDelta(new Map(), newScan.binaryScans);
 
       return {
         ...base,
@@ -94,6 +110,7 @@ export class JavaScriptAnalyzer implements EcosystemAnalyzer {
           delta: newFindings,
           platformDivergence: false,
         },
+        ...(binaryDelta.length > 0 && { binaryFindings: { delta: binaryDelta } }),
         ...(newHooks.length > 0 && { installHooks: newHooks.map((h) => ({ ...h, isNew: true })) }),
         ...(repoCheck && { repoCheck }),
         ...(registryCheck && { registryCheck }),
@@ -110,7 +127,7 @@ export class JavaScriptAnalyzer implements EcosystemAnalyzer {
     const oldArtifact = getArtifactInfo(oldMeta);
     const repoUrl = extractRepoUrl(newMeta);
 
-    const [newFiles, oldFiles, repoCheck] = await Promise.all([
+    const [newScan, oldScan, repoCheck] = await Promise.all([
       download(new_version!, 'new')(newArtifact.url),
       download(old_version!, 'old')(oldArtifact.url),
       checkRepoRelease({
@@ -121,11 +138,12 @@ export class JavaScriptAnalyzer implements EcosystemAnalyzer {
       }),
     ]);
 
-    const newFindings = scanPatterns(newFiles, DANGEROUS_PATTERNS);
-    const oldFindings = scanPatterns(oldFiles, DANGEROUS_PATTERNS);
-    const annotated = annotateHooks(detectNpmHooks(oldFiles), detectNpmHooks(newFiles));
+    const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS);
+    const oldFindings = scanPatterns(oldScan.files, DANGEROUS_PATTERNS);
+    const annotated = annotateHooks(detectNpmHooks(oldScan.files), detectNpmHooks(newScan.files));
+    const binaryDelta = binaryFindingsDelta(oldScan.binaryScans, newScan.binaryScans);
 
-    const buildSystemChanged = checkNpmNativeBuild(oldFiles, newFiles);
+    const buildSystemChanged = checkNpmNativeBuild(oldScan.files, newScan.files);
     const baseDelta = computeMetadataDelta(oldMeta, newMeta);
     const metadataDelta = { ...baseDelta, ...(buildSystemChanged && { buildSystemChanged }) };
 
@@ -139,13 +157,14 @@ export class JavaScriptAnalyzer implements EcosystemAnalyzer {
         newArtifacts: [newArtifact],
       },
       metadataDelta,
-      codeDelta: diffFiles(oldFiles, newFiles),
+      codeDelta: diffFiles(oldScan.files, newScan.files),
       securityFindings: {
         old: oldFindings,
         new: newFindings,
         delta: findingsDelta(oldFindings, newFindings),
         platformDivergence: false,
       },
+      ...(binaryDelta.length > 0 && { binaryFindings: { delta: binaryDelta } }),
       ...(annotated.length > 0 && { installHooks: annotated }),
       ...(repoCheck && { repoCheck }),
       ...(registryCheck && { registryCheck }),

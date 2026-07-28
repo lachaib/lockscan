@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractImportedSymbols } from '../../../src/ecosystems/python/binary-formats.js';
+import { extractImportedSymbols } from '../../../src/ecosystems/shared/binary-formats.js';
 import { buildElf, buildMachO, buildPe } from './binary-fixtures.js';
 
 describe('extractImportedSymbols — ELF', () => {
