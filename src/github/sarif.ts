@@ -91,6 +91,16 @@ const RULES: Record<string, SarifRule> = {
     defaultConfiguration: { level: 'error' },
     properties: { tags: ['security', 'supply-chain'], precision: 'high' },
   },
+  'lockscan/version-shape-note': {
+    id: 'lockscan/version-shape-note',
+    name: 'UnusualVersionNumber',
+    shortDescription: { text: 'Version number looks unusual but is uncorroborated' },
+    fullDescription: {
+      text: 'The new version number matches a shape sometimes used in dependency confusion attacks (e.g. a comically high or round major version), but no registry change or missing source release tag corroborates it. Legitimate projects ship round major bumps too, so this is informational only.',
+    },
+    defaultConfiguration: { level: 'note' },
+    properties: { tags: ['security', 'supply-chain'], precision: 'low' },
+  },
   'lockscan/registry-change': {
     id: 'lockscan/registry-change',
     name: 'RegistryChanged',
@@ -295,6 +305,18 @@ function resultsForPackage(
       level: 'error',
       message: {
         text: `${pkg.name} (${versionStr}) shows dependency confusion signals: ${pkg.registryCheck.confusionReasons.join('; ')}`,
+      },
+      locations: [loc],
+    });
+  }
+
+  // Version number alone looks unusual but isn't corroborated — informational only.
+  if (pkg.registryCheck?.versionShapeSuspicious && !pkg.registryCheck?.potentialConfusion) {
+    results.push({
+      ruleId: 'lockscan/version-shape-note',
+      level: 'note',
+      message: {
+        text: `${pkg.name} (${versionStr}) has an unusual version number (${pkg.registryCheck.confusionReasons.join('; ')}) with no corroborating registry change or missing source tag`,
       },
       locations: [loc],
     });

@@ -281,8 +281,14 @@ function formatRegistryCheck(r: RegistryCheck): string {
     for (const reason of r.confusionReasons) {
       lines.push(`  ⚠ DEPENDENCY CONFUSION: ${reason}`);
     }
+  } else if (r.versionShapeSuspicious) {
+    // Version number alone looks unusual, but it isn't corroborated by a registry
+    // change or a dropped release tag — note it without raising a confusion alarm.
+    for (const reason of r.confusionReasons) {
+      lines.push(`  ℹ version note: ${reason}`);
+    }
   }
-  if (!r.registryChanged && !r.potentialConfusion) {
+  if (!r.registryChanged && !r.potentialConfusion && !r.versionShapeSuspicious) {
     if (r.oldRegistry || r.newRegistry) {
       lines.push(`  registry: ${r.newRegistry ?? r.oldRegistry}`);
     }

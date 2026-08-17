@@ -35,8 +35,24 @@ export interface RegistryCheck {
   oldRegistry?: string;
   newRegistry?: string;
   registryChanged: boolean;
+  /**
+   * True once a confusion signal is corroborated enough to act on: either the
+   * registry/publish trail itself is anomalous (e.g. moved from a private
+   * registry to a public one), or a weak version-shape signal (see
+   * `versionShapeSuspicious`) is backed by an actual registry change or a
+   * missing release tag in the source repository (`RepoCheck.releaseDropped`).
+   */
   potentialConfusion: boolean;
   confusionReasons: string[];
+  /**
+   * True when the new version number alone looks like a classic dependency-confusion
+   * pattern (comically high major, or a round major with no minor/patch — e.g.
+   * `50.0.0`). Legitimate projects ship big round major bumps too (semver-major
+   * releases, marketing versions, …), so this is a weak signal on its own: it does
+   * not raise `potentialConfusion` unless corroborated by a registry change or a
+   * dropped source release tag.
+   */
+  versionShapeSuspicious: boolean;
 }
 
 export interface BinaryFinding {

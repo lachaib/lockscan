@@ -144,10 +144,9 @@ The tool queries [osv.dev](https://osv.dev) — the same database used by `pip a
 **Dependency confusion** (discovered by Alex Birsan, 2021): if a private package `acme-utils` exists only in your internal registry, an attacker can publish `acme-utils` to the public npm / PyPI registry with a very high version number. Package managers that check the public registry first will resolve to the attacker's version.
 
 Detection heuristics:
-- **Major version ≥ 100:** The classic confusion signal — no real package reaches v100+ without warning.
-- **Round high version (e.g. 99.0.0):** Attacker sets an implausibly round version to win the resolver.
-- **Private → public registry switch:** The resolved registry URL changed from an internal host to npmjs.org / pypi.org.
-- **New package added directly from public registry with suspiciously high version.**
+- **Private → public registry switch:** The resolved registry URL changed from an internal host to npmjs.org / pypi.org. Flagged as `critical` on its own — this is a real change in provenance.
+- **Major version ≥ 100, or a round high version (e.g. 99.0.0 / 50.0.0):** A version number matching the classic confusion pattern. **This is a weak signal on its own** — legitimate projects ship big round major bumps too (e.g. a library jumping straight to a round marketing version). It only escalates to `critical` when corroborated by an actual registry change (above) or a missing matching tag in the package's source repository (see [§ Repository release matching](#5-repository-release-matching)); otherwise it's surfaced at `low` severity for visibility, not treated as a confirmed finding.
+- **New package added directly from public registry with an unusually high version:** Same weak-signal treatment as above — a first-time dependency addition at a modern major version is common and not inherently suspicious.
 
 
 ---

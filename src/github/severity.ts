@@ -169,6 +169,11 @@ export function packageMaxSeverity(pkg: PackageAnalysis): Severity | null {
   if (pkg.installHooks?.some((h) => h.isNew)) s = higher(s, 'high');
 
   if (pkg.registryCheck?.potentialConfusion) s = higher(s, 'critical');
+  // Uncorroborated: the version number alone looks unusual (e.g. a round major bump
+  // like 50.0.0), but nothing backs it up — surface it at low severity rather than
+  // silence it entirely. `reconcileConfusionSignal` already promotes this to
+  // `potentialConfusion` (critical, above) once it's corroborated.
+  else if (pkg.registryCheck?.versionShapeSuspicious) s = higher(s, 'low');
   if (pkg.registryCheck?.registryChanged) s = higher(s, 'moderate');
   if (pkg.repoCheck?.releaseDropped) s = higher(s, 'moderate');
   if (pkg.metadataDelta?.newBinaryWheels) s = higher(s, 'moderate');
