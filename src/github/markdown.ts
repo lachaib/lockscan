@@ -43,6 +43,7 @@ function packageSignals(pkg: PackageAnalysis): string[] {
     signals.push(`${n} new install hook(s)`);
   }
   if (pkg.registryCheck?.potentialConfusion) signals.push('**dependency confusion**');
+  else if (pkg.registryCheck?.versionShapeSuspicious) signals.push('unusual version number');
   if (pkg.registryCheck?.registryChanged) signals.push('registry changed');
   if (pkg.repoCheck?.releaseDropped) signals.push('release tag dropped');
   if ((pkg.registryInfo?.versionAgeDays ?? Infinity) < 1) signals.push('⚡ fresh publish');

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DiffReport } from 'lockdelta';
 import { getAnalyzer } from '../ecosystems/index.js';
+import { reconcileConfusionSignal } from '../ecosystems/shared/registry-check.js';
 import { queryOsv } from '../ecosystems/shared/vuln-check.js';
 import type { AnalyzeOptions } from '../index.js';
 import type { Platform } from '../platforms.js';
@@ -64,10 +65,22 @@ export async function analyze(
           `  [${i + 1}/${changes.length}] ${change.name} (${change.change_type})\n`,
         );
         try {
-          const analysis = await analyzer.analyzeChange(change, {
+          const rawAnalysis = await analyzer.analyzeChange(change, {
             platforms,
             tmpDir: join(tmpDir, lf.ecosystem),
           });
+          // Weak, version-shape-only confusion signals (e.g. a round major bump like
+          // 50.0.0) need corroboration from the repo check before they're treated as
+          // real findings — reconcile here, once, across every ecosystem.
+          const analysis = rawAnalysis.registryCheck
+            ? {
+                ...rawAnalysis,
+                registryCheck: reconcileConfusionSignal(
+                  rawAnalysis.registryCheck,
+                  rawAnalysis.repoCheck,
+                ),
+              }
+            : rawAnalysis;
           const vulns = change.new_version
             ? osvResults.get(`${change.name}@${change.new_version}`)
             : undefined;

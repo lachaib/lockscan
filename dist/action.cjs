@@ -26627,6 +26627,7 @@ function packageMaxSeverity(pkg) {
   if (pkg.metadataDelta?.buildSystemChanged) s3 = higher(s3, "high");
   if (pkg.installHooks?.some((h) => h.isNew)) s3 = higher(s3, "high");
   if (pkg.registryCheck?.potentialConfusion) s3 = higher(s3, "critical");
+  else if (pkg.registryCheck?.versionShapeSuspicious) s3 = higher(s3, "low");
   if (pkg.registryCheck?.registryChanged) s3 = higher(s3, "moderate");
   if (pkg.repoCheck?.releaseDropped) s3 = higher(s3, "moderate");
   if (pkg.metadataDelta?.newBinaryWheels) s3 = higher(s3, "moderate");
@@ -26760,6 +26761,7 @@ function buildSignals(pkg) {
   if (pkg.metadataDelta?.buildSystemChanged) signals.push("build system changed");
   if (pkg.installHooks?.some((h) => h.isNew)) signals.push("new install hooks");
   if (pkg.registryCheck?.potentialConfusion) signals.push("dependency confusion");
+  else if (pkg.registryCheck?.versionShapeSuspicious) signals.push("unusual version number");
   if (pkg.registryCheck?.registryChanged) signals.push("registry changed");
   if (pkg.repoCheck?.releaseDropped) signals.push("release tag dropped");
   if ((pkg.registryInfo?.versionAgeDays ?? Infinity) < 1) signals.push("fresh publish (<24h)");
@@ -26831,6 +26833,7 @@ function packageSignals(pkg) {
     signals.push(`${n} new install hook(s)`);
   }
   if (pkg.registryCheck?.potentialConfusion) signals.push("**dependency confusion**");
+  else if (pkg.registryCheck?.versionShapeSuspicious) signals.push("unusual version number");
   if (pkg.registryCheck?.registryChanged) signals.push("registry changed");
   if (pkg.repoCheck?.releaseDropped) signals.push("release tag dropped");
   if ((pkg.registryInfo?.versionAgeDays ?? Infinity) < 1) signals.push("\u26A1 fresh publish");
@@ -26996,6 +26999,16 @@ var RULES = {
     },
     defaultConfiguration: { level: "error" },
     properties: { tags: ["security", "supply-chain"], precision: "high" }
+  },
+  "lockscan/version-shape-note": {
+    id: "lockscan/version-shape-note",
+    name: "UnusualVersionNumber",
+    shortDescription: { text: "Version number looks unusual but is uncorroborated" },
+    fullDescription: {
+      text: "The new version number matches a shape sometimes used in dependency confusion attacks (e.g. a comically high or round major version), but no registry change or missing source release tag corroborates it. Legitimate projects ship round major bumps too, so this is informational only."
+    },
+    defaultConfiguration: { level: "note" },
+    properties: { tags: ["security", "supply-chain"], precision: "low" }
   },
   "lockscan/registry-change": {
     id: "lockscan/registry-change",
@@ -27167,6 +27180,16 @@ function resultsForPackage(pkg, ecosystem, lockfilePath, workspace) {
       level: "error",
       message: {
         text: `${pkg.name} (${versionStr}) shows dependency confusion signals: ${pkg.registryCheck.confusionReasons.join("; ")}`
+      },
+      locations: [loc]
+    });
+  }
+  if (pkg.registryCheck?.versionShapeSuspicious && !pkg.registryCheck?.potentialConfusion) {
+    results.push({
+      ruleId: "lockscan/version-shape-note",
+      level: "note",
+      message: {
+        text: `${pkg.name} (${versionStr}) has an unusual version number (${pkg.registryCheck.confusionReasons.join("; ")}) with no corroborating registry change or missing source tag`
       },
       locations: [loc]
     });
@@ -31445,42 +31468,66 @@ function parseVersion(version) {
 function confusionHeuristics(version, changeType, reg) {
   const reasons = [];
   const [major, minor, patch] = parseVersion(version);
+  let versionShapeSuspicious = false;
+  let registryAnomaly = false;
   if (major >= 100) {
+    versionShapeSuspicious = true;
     reasons.push(
-      `suspiciously high major version (${version}) \u2014 classic dependency confusion pattern`
+      `suspiciously high major version (${version}) \u2014 classic dependency confusion pattern (weak signal unless corroborated)`
     );
   } else if (major > 9 && minor === 0 && patch === 0) {
+    versionShapeSuspicious = true;
     reasons.push(
-      `round high version (${version}) with no minor/patch \u2014 possible confusion attempt`
+      `round high version (${version}) with no minor/patch \u2014 possible confusion attempt (weak signal unless corroborated)`
     );
   }
   if (isPrivate(reg.old_registry_url) && isPublic(reg.new_registry_url)) {
+    registryAnomaly = true;
     reasons.push(
       `registry moved from private (${reg.old_registry_url}) to public (${reg.new_registry_url})`
     );
   }
   if (changeType === "added" && isPublic(reg.new_registry_url) && !reg.old_registry_url) {
     if (major >= 10) {
+      versionShapeSuspicious = true;
       reasons.push(
-        `package added directly from public registry with an unusually high version (${version})`
+        `package added directly from public registry with an unusually high version (${version}) (weak signal unless corroborated)`
       );
     }
   }
-  return reasons;
+  return { reasons, versionShapeSuspicious, registryAnomaly };
 }
 function checkRegistry(change) {
   const { old_registry_url, new_registry_url, new_version } = change;
   if (!old_registry_url && !new_registry_url) return void 0;
   const registryChanged = old_registry_url !== void 0 && new_registry_url !== void 0 && old_registry_url !== new_registry_url;
-  const confusionReasons = new_version ? confusionHeuristics(new_version, change.change_type, change) : [];
+  const {
+    reasons: confusionReasons,
+    versionShapeSuspicious,
+    registryAnomaly
+  } = new_version ? confusionHeuristics(new_version, change.change_type, change) : { reasons: [], versionShapeSuspicious: false, registryAnomaly: false };
   if (!registryChanged && confusionReasons.length === 0) return void 0;
   return {
     oldRegistry: old_registry_url,
     newRegistry: new_registry_url,
     registryChanged,
-    potentialConfusion: confusionReasons.length > 0,
-    confusionReasons
+    // Only the strong, provenance-based signal stands on its own here. A weak
+    // version-shape signal is reconciled against corroborating evidence (registry
+    // change / dropped release tag) by `reconcileConfusionSignal` once the repo
+    // check has run — see that function for the combined rule.
+    potentialConfusion: registryAnomaly,
+    confusionReasons,
+    versionShapeSuspicious
   };
+}
+function reconcileConfusionSignal(registryCheck, repoCheck) {
+  if (!registryCheck) return registryCheck;
+  if (registryCheck.potentialConfusion || !registryCheck.versionShapeSuspicious) {
+    return registryCheck;
+  }
+  const corroborated = registryCheck.registryChanged || !!repoCheck?.releaseDropped;
+  if (!corroborated) return registryCheck;
+  return { ...registryCheck, potentialConfusion: true };
 }
 
 // src/ecosystems/shared/repo-check.ts
@@ -32970,10 +33017,17 @@ Analyzing ${lf.path ?? "lockfile"} (${lf.ecosystem}): ${changes.length} change(s
 `
         );
         try {
-          const analysis = await analyzer.analyzeChange(change, {
+          const rawAnalysis = await analyzer.analyzeChange(change, {
             platforms,
             tmpDir: (0, import_node_path16.join)(tmpDir, lf.ecosystem)
           });
+          const analysis = rawAnalysis.registryCheck ? {
+            ...rawAnalysis,
+            registryCheck: reconcileConfusionSignal(
+              rawAnalysis.registryCheck,
+              rawAnalysis.repoCheck
+            )
+          } : rawAnalysis;
           const vulns = change.new_version ? osvResults.get(`${change.name}@${change.new_version}`) : void 0;
           packages.push(vulns?.length ? { ...analysis, knownVulns: vulns } : analysis);
         } catch (err) {

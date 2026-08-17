@@ -147,6 +147,7 @@ function buildSignals(pkg: import('../types.js').PackageAnalysis): string[] {
   if (pkg.metadataDelta?.buildSystemChanged) signals.push('build system changed');
   if (pkg.installHooks?.some((h) => h.isNew)) signals.push('new install hooks');
   if (pkg.registryCheck?.potentialConfusion) signals.push('dependency confusion');
+  else if (pkg.registryCheck?.versionShapeSuspicious) signals.push('unusual version number');
   if (pkg.registryCheck?.registryChanged) signals.push('registry changed');
   if (pkg.repoCheck?.releaseDropped) signals.push('release tag dropped');
   if ((pkg.registryInfo?.versionAgeDays ?? Infinity) < 1) signals.push('fresh publish (<24h)');
