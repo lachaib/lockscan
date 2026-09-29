@@ -32975,8 +32975,10 @@ function platformLabel(p2) {
 var DEFAULT_CHANGE_TYPES = /* @__PURE__ */ new Set(["added", "updated", "removed"]);
 async function analyze(report, options) {
   const onlyTypes = options.onlyTypes ? new Set(options.onlyTypes) : DEFAULT_CHANGE_TYPES;
-  const platforms = await resolvePlatforms(options.platforms);
-  process.stderr.write(`Platforms: ${platforms.map(platformLabel).join(", ")}
+  const progress = options.quiet ? () => {
+  } : (msg) => process.stderr.write(msg);
+  const platforms = await resolvePlatforms(options.platforms, progress);
+  progress(`Platforms: ${platforms.map(platformLabel).join(", ")}
 `);
   const tmpDir = await (0, import_promises4.mkdtemp)((0, import_node_path16.join)((0, import_node_os.tmpdir)(), "lockscan-"));
   try {
@@ -33001,7 +33003,7 @@ async function analyze(report, options) {
         });
         continue;
       }
-      process.stderr.write(
+      progress(
         `
 Analyzing ${lf.path ?? "lockfile"} (${lf.ecosystem}): ${changes.length} change(s)...
 `
@@ -33012,10 +33014,8 @@ Analyzing ${lf.path ?? "lockfile"} (${lf.ecosystem}): ${changes.length} change(s
       const packages = [];
       for (let i = 0; i < changes.length; i++) {
         const change = changes[i];
-        process.stderr.write(
-          `  [${i + 1}/${changes.length}] ${change.name} (${change.change_type})
-`
-        );
+        progress(`  [${i + 1}/${changes.length}] ${change.name} (${change.change_type})
+`);
         try {
           const rawAnalysis = await analyzer.analyzeChange(change, {
             platforms,
@@ -33056,12 +33056,12 @@ Analyzing ${lf.path ?? "lockfile"} (${lf.ecosystem}): ${changes.length} change(s
     await (0, import_promises4.rm)(tmpDir, { recursive: true, force: true });
   }
 }
-async function resolvePlatforms(explicit) {
+async function resolvePlatforms(explicit, progress) {
   if (explicit && explicit.length > 0) return explicit;
   const host = detectHostPlatform();
   const python = await detectPythonVersion(process.cwd());
   if (python) {
-    process.stderr.write(`Detected Python ${python} from project config
+    progress(`Detected Python ${python} from project config
 `);
     return [{ ...host, python }];
   }

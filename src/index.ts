@@ -25,6 +25,8 @@ export interface AnalyzeOptions {
   platforms?: Platform[];
   /** Limit analysis to these change types. Defaults to all: added, updated, removed. */
   onlyTypes?: string[];
+  /** Suppress progress logs on stderr. Warnings and errors are still written. */
+  quiet?: boolean;
 }
 
 export async function analyze(

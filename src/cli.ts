@@ -31,42 +31,52 @@ program
     'comma-separated change types to analyze: added,updated,removed (default: all)',
   )
   .option('--format <fmt>', 'output format: text|json (default: text)', 'text')
-  .action(async (opts: { input?: string; platform: Platform[]; only?: string; format: string }) => {
-    const raw = opts.input ? readFileSync(opts.input, 'utf8') : await readStdin();
+  .option('-q, --quiet', 'suppress progress logs on stderr (warnings and errors are still shown)')
+  .action(
+    async (opts: {
+      input?: string;
+      platform: Platform[];
+      only?: string;
+      format: string;
+      quiet?: boolean;
+    }) => {
+      const raw = opts.input ? readFileSync(opts.input, 'utf8') : await readStdin();
 
-    let input: DiffReport;
-    try {
-      input = JSON.parse(raw) as DiffReport;
-    } catch (err) {
-      process.stderr.write(`ERROR: invalid JSON input — ${err}\n`);
-      process.exit(1);
-    }
-
-    // Platform resolution order: --platform flags > LOCKSCAN_PLATFORMS env var > auto-detect
-    let platforms: Platform[] | undefined;
-    if (opts.platform.length > 0) {
-      platforms = opts.platform;
-    } else if (process.env.LOCKSCAN_PLATFORMS) {
+      let input: DiffReport;
       try {
-        platforms = parsePlatforms(process.env.LOCKSCAN_PLATFORMS);
+        input = JSON.parse(raw) as DiffReport;
       } catch (err) {
-        process.stderr.write(`ERROR: LOCKSCAN_PLATFORMS — ${err}\n`);
+        process.stderr.write(`ERROR: invalid JSON input — ${err}\n`);
         process.exit(1);
       }
-    }
-    // if still undefined, analyzer.ts falls back to host + pyproject.toml detection
 
-    const report = await analyze(input, {
-      platforms,
-      onlyTypes: opts.only ? opts.only.split(',') : undefined,
-    });
+      // Platform resolution order: --platform flags > LOCKSCAN_PLATFORMS env var > auto-detect
+      let platforms: Platform[] | undefined;
+      if (opts.platform.length > 0) {
+        platforms = opts.platform;
+      } else if (process.env.LOCKSCAN_PLATFORMS) {
+        try {
+          platforms = parsePlatforms(process.env.LOCKSCAN_PLATFORMS);
+        } catch (err) {
+          process.stderr.write(`ERROR: LOCKSCAN_PLATFORMS — ${err}\n`);
+          process.exit(1);
+        }
+      }
+      // if still undefined, analyzer.ts falls back to host + pyproject.toml detection
 
-    if (opts.format === 'json') {
-      process.stdout.write(JSON.stringify(report, null, 2) + '\n');
-    } else {
-      process.stdout.write(formatReport(report) + '\n');
-    }
-  });
+      const report = await analyze(input, {
+        platforms,
+        onlyTypes: opts.only ? opts.only.split(',') : undefined,
+        quiet: opts.quiet,
+      });
+
+      if (opts.format === 'json') {
+        process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+      } else {
+        process.stdout.write(formatReport(report) + '\n');
+      }
+    },
+  );
 
 program.parseAsync(process.argv).catch((err: unknown) => {
   process.stderr.write(`ERROR: ${err}\n`);
