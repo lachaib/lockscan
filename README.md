@@ -237,6 +237,7 @@ lockdelta diff base.lock head.lock | lockscan [options]
 | `--platform <spec>` | Target platform(s). Format: `os/arch[/pyver]` (e.g. `linux/x86_64/3.12`, `macos/arm64`). Repeatable. Defaults to current host. |
 | `--only <types>` | Restrict to `added`, `updated`, or `removed`. Comma-separated. |
 | `--format json\|text` | Output format. Default: `text`. |
+| `-q, --quiet` | Suppress progress logs on stderr. Warnings and errors are still shown. |
 
 ### Environment variables
 

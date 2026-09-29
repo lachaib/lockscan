@@ -17,9 +17,10 @@ export async function analyze(
   options: AnalyzeOptions,
 ): Promise<SecurityReport> {
   const onlyTypes = options.onlyTypes ? new Set(options.onlyTypes) : DEFAULT_CHANGE_TYPES;
-  const platforms = await resolvePlatforms(options.platforms);
+  const progress = options.quiet ? () => {} : (msg: string) => process.stderr.write(msg);
+  const platforms = await resolvePlatforms(options.platforms, progress);
 
-  process.stderr.write(`Platforms: ${platforms.map(platformLabel).join(', ')}\n`);
+  progress(`Platforms: ${platforms.map(platformLabel).join(', ')}\n`);
 
   const tmpDir = await mkdtemp(join(tmpdir(), 'lockscan-'));
   try {
@@ -47,7 +48,7 @@ export async function analyze(
         continue;
       }
 
-      process.stderr.write(
+      progress(
         `\nAnalyzing ${lf.path ?? 'lockfile'} (${lf.ecosystem}): ${changes.length} change(s)...\n`,
       );
 
@@ -61,9 +62,7 @@ export async function analyze(
       const packages: PackageAnalysis[] = [];
       for (let i = 0; i < changes.length; i++) {
         const change = changes[i];
-        process.stderr.write(
-          `  [${i + 1}/${changes.length}] ${change.name} (${change.change_type})\n`,
-        );
+        progress(`  [${i + 1}/${changes.length}] ${change.name} (${change.change_type})\n`);
         try {
           const rawAnalysis = await analyzer.analyzeChange(change, {
             platforms,
@@ -114,7 +113,10 @@ export async function analyze(
   }
 }
 
-async function resolvePlatforms(explicit: Platform[] | undefined): Promise<Platform[]> {
+async function resolvePlatforms(
+  explicit: Platform[] | undefined,
+  progress: (msg: string) => void,
+): Promise<Platform[]> {
   if (explicit && explicit.length > 0) return explicit;
 
   const host = detectHostPlatform();
@@ -122,7 +124,7 @@ async function resolvePlatforms(explicit: Platform[] | undefined): Promise<Platf
   // Try to fill in the Python version from the working directory
   const python = await detectPythonVersion(process.cwd());
   if (python) {
-    process.stderr.write(`Detected Python ${python} from project config\n`);
+    progress(`Detected Python ${python} from project config\n`);
     return [{ ...host, python }];
   }
 
