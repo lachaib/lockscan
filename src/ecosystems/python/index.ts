@@ -65,7 +65,8 @@ function mergeBinaryScans(scans: WheelScan[]): Map<string, BinaryScan> {
   const merged = new Map<string, BinaryScan>();
   for (const { binaryScans } of scans) {
     for (const [filename, scan] of binaryScans) {
-      if (!merged.has(filename)) merged.set(filename, scan);
+      const existing = merged.get(filename);
+      if (!existing || (!existing.signature && scan.signature)) merged.set(filename, scan);
     }
   }
   return merged;

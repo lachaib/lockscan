@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import AdmZip from 'adm-zip';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { extractTarballBinaries, extractZipBinaries } from '../../src/utils/extract.js';
+import { buildElf, buildSignedMachO } from '../ecosystems/shared/binary-fixtures.js';
 
 let dir: string;
 
@@ -59,5 +60,37 @@ describe('extractZipBinaries', () => {
     const binaries = extractZipBinaries(zip.toBuffer());
 
     expect(new Set(binaries.keys())).toEqual(new Set(['addon.node', 'lib.so']));
+  });
+});
+
+describe('extensionless executables', () => {
+  const elf = buildElf(
+    Array.from({ length: 80 }, (_, i) => ({ name: `sym_${i}`, undefined: true })),
+  );
+
+  it('collects extensionless native executables from a tarball but not text files', async () => {
+    await mkdir(join(dir, 'bin'), { recursive: true });
+    await writeFile(join(dir, 'bin', 'tool'), elf);
+    await writeFile(join(dir, 'LICENSE'), 'MIT '.repeat(500));
+    await writeFile(join(dir, 'bin', 'tiny'), Buffer.from([0x7f, 0x45, 0x4c, 0x46]));
+
+    const binaries = await extractTarballBinaries(dir);
+
+    expect([...binaries.keys()]).toEqual(['bin/tool']);
+  });
+
+  it('collects wheel scripts and .exe files, normalizing the versioned .data directory', () => {
+    const mach = Buffer.concat([
+      buildSignedMachO({ identifier: 'ruff', cms: true }),
+      Buffer.alloc(2048),
+    ]);
+    const zip = new AdmZip();
+    zip.addFile('ruff-1.2.3.data/scripts/ruff', mach);
+    zip.addFile('ruff-1.2.3.data/scripts/ruff.exe', Buffer.from([0x01]));
+    zip.addFile('ruff-1.2.3.dist-info/METADATA', Buffer.from('Name: ruff\n'.repeat(200)));
+
+    const binaries = extractZipBinaries(zip.toBuffer());
+
+    expect([...binaries.keys()].sort()).toEqual(['.data/scripts/ruff', '.data/scripts/ruff.exe']);
   });
 });

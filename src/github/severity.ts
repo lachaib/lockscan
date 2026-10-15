@@ -130,6 +130,8 @@ function binaryFindingSeverity(label: string): Severity {
   if (label === 'binary:sensitive-path' || label === 'binary:url-other-scheme') return 'high';
   // Entropy spikes and new dangerous native symbols are high-confidence signals.
   if (label === 'binary:high-entropy' || label.startsWith('native:')) return 'high';
+  // A signature that vanished or changed signer is a takeover / tampered-build indicator.
+  if (label === 'binary:signature-dropped' || label === 'binary:signer-changed') return 'high';
   // HTTP URLs, IPv4/v6, and temp paths warrant attention but appear in legitimate packages.
   if (
     label === 'binary:url-http' ||

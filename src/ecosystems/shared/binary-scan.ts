@@ -1,4 +1,5 @@
 import { extractImportedSymbols } from './binary-formats.js';
+import { type CodeSignature, extractCodeSignature } from './binary-signature.js';
 
 /** Dangerous libc / OS symbols — a pure math or data library importing these is suspicious. */
 const DANGEROUS_NATIVE_SYMBOLS = [
@@ -119,6 +120,8 @@ export interface BinaryScan {
   suspiciousStrings: SuspiciousString[];
   /** Shannon entropy of the binary — high values suggest packed/encrypted sections. */
   entropy: number;
+  /** Embedded Developer ID / Authenticode signature, when present. */
+  signature?: CodeSignature;
 }
 
 export interface BinaryFinding {
@@ -190,7 +193,37 @@ export function scanBinary(filename: string, data: Buffer): BinaryScan {
     if (suspiciousStrings.length >= 50) break;
   }
 
-  return { filename, symbolCounts, suspiciousStrings, entropy: shannonEntropy(data) };
+  const signature = extractCodeSignature(data);
+  return {
+    filename,
+    symbolCounts,
+    suspiciousStrings,
+    entropy: shannonEntropy(data),
+    ...(signature && { signature }),
+  };
+}
+
+function signatureDelta(
+  file: string,
+  oldSig: CodeSignature | undefined,
+  newSig: CodeSignature | undefined,
+): BinaryFinding | undefined {
+  if (!oldSig) return undefined;
+  const oldId = oldSig.identity ?? 'signed';
+  if (!newSig) {
+    return { file, label: 'binary:signature-dropped', detail: `${oldId} → unsigned` };
+  }
+  // Identities from different signing schemes (Apple vs Authenticode) are not comparable.
+  if (oldSig.format === newSig.format && oldSig.identity && newSig.identity) {
+    if (oldSig.identity !== newSig.identity) {
+      return {
+        file,
+        label: 'binary:signer-changed',
+        detail: `${oldSig.identity} → ${newSig.identity}`,
+      };
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -205,6 +238,9 @@ export function binaryFindingsDelta(
 
   for (const [filename, newScan] of newScans) {
     const oldScan = oldScans.get(filename);
+
+    const signatureFinding = signatureDelta(filename, oldScan?.signature, newScan.signature);
+    if (signatureFinding) findings.push(signatureFinding);
 
     // Entropy spike (packed/encrypted section introduced or grown)
     if (newScan.entropy >= HIGH_ENTROPY_THRESHOLD) {

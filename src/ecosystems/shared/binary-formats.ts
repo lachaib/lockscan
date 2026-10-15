@@ -27,6 +27,21 @@ export function extractImportedSymbols(data: Buffer): string[] {
   }
 }
 
+/** True when the buffer starts with an ELF, Mach-O (thin or fat) or PE header. */
+export function isNativeBinary(data: Buffer): boolean {
+  if (data.length < 64) return false;
+  const magic = data.readUInt32LE(0);
+  if (magic === ELF_MAGIC || magic === MH_MAGIC || magic === MH_MAGIC_64) return true;
+  const fatMagic = data.readUInt32BE(0);
+  // 0xcafebabe is shared with Java class files, whose next field (version) is far above any arch count.
+  if (fatMagic === FAT_MAGIC || fatMagic === FAT_MAGIC_64) return data.readUInt32BE(4) <= 30;
+  if (data[0] === 0x4d && data[1] === 0x5a) {
+    const peOffset = data.readUInt32LE(0x3c);
+    return peOffset + 4 <= data.length && data.readUInt32LE(peOffset) === 0x00004550;
+  }
+  return false;
+}
+
 function readCString(data: Buffer, offset: number): string {
   if (offset < 0 || offset >= data.length) return '';
   let end = offset;
