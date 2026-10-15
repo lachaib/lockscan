@@ -59,7 +59,6 @@ interface SuspiciousStringPattern {
 const SUSPICIOUS_STRING_PATTERNS: SuspiciousStringPattern[] = [
   // Sensitive system paths hardcoded in a binary are almost always malicious.
   {
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
     regex: /\/etc\/(?:passwd|shadow|hosts|crontab|sudoers)/,
     label: 'binary:sensitive-path',
   },

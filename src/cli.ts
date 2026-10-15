@@ -71,9 +71,9 @@ program
       });
 
       if (opts.format === 'json') {
-        process.stdout.write(JSON.stringify(report, null, 2) + '\n');
+        process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
       } else {
-        process.stdout.write(formatReport(report) + '\n');
+        process.stdout.write(`${formatReport(report)}\n`);
       }
     },
   );

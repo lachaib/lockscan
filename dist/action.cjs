@@ -26734,7 +26734,7 @@ function resolveManifest(ecosystem, lockfilePath, packageName, workspace) {
       continue;
     }
     const line = resolver.findPackageLine(content, packageName);
-    const relativePath = candidate.startsWith(workspace + "/") ? candidate.slice(workspace.length + 1) : candidate;
+    const relativePath = candidate.startsWith(`${workspace}/`) ? candidate.slice(workspace.length + 1) : candidate;
     return { relativePath, line };
   }
   return null;
@@ -30672,7 +30672,6 @@ var SYMBOL_SET = new Set(DANGEROUS_NATIVE_SYMBOLS);
 var SUSPICIOUS_STRING_PATTERNS = [
   // Sensitive system paths hardcoded in a binary are almost always malicious.
   {
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional null-byte exclusion
     regex: /\/etc\/(?:passwd|shadow|hosts|crontab|sudoers)/,
     label: "binary:sensitive-path"
   },
@@ -33051,7 +33050,7 @@ Analyzing ${lf.path ?? "lockfile"} (${lf.ecosystem}): ${changes.length} change(s
         packages
       });
     }
-    return buildReport(report, lockfileAnalyses, platforms);
+    return buildReport(report, lockfileAnalyses);
   } finally {
     await (0, import_promises4.rm)(tmpDir, { recursive: true, force: true });
   }
@@ -33067,7 +33066,7 @@ async function resolvePlatforms(explicit, progress) {
   }
   return [host];
 }
-function buildReport(input, lockfiles, platforms) {
+function buildReport(input, lockfiles) {
   const analyzed = lockfiles.reduce((s3, lf) => s3 + lf.packages.length, 0);
   const errors = lockfiles.reduce((s3, lf) => s3 + lf.packages.filter((p2) => p2.error).length, 0);
   const newSecurityFindings = lockfiles.reduce(

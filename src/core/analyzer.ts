@@ -107,7 +107,7 @@ export async function analyze(
       });
     }
 
-    return buildReport(report, lockfileAnalyses, platforms);
+    return buildReport(report, lockfileAnalyses);
   } finally {
     await rm(tmpDir, { recursive: true, force: true });
   }
@@ -131,11 +131,7 @@ async function resolvePlatforms(
   return [host];
 }
 
-function buildReport(
-  input: DiffReport,
-  lockfiles: LockfileAnalysis[],
-  platforms: Platform[],
-): SecurityReport {
+function buildReport(input: DiffReport, lockfiles: LockfileAnalysis[]): SecurityReport {
   const analyzed = lockfiles.reduce((s, lf) => s + lf.packages.length, 0);
   const errors = lockfiles.reduce((s, lf) => s + lf.packages.filter((p) => p.error).length, 0);
   const newSecurityFindings = lockfiles.reduce(

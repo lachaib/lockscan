@@ -116,7 +116,7 @@ export function resolveManifest(
       continue;
     }
     const line = resolver.findPackageLine(content, packageName);
-    const relativePath = candidate.startsWith(workspace + '/')
+    const relativePath = candidate.startsWith(`${workspace}/`)
       ? candidate.slice(workspace.length + 1)
       : candidate;
     return { relativePath, line };
