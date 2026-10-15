@@ -83,12 +83,12 @@ export function formatReport(report: SecurityReport): string {
       `${THIN}`;
 
     if (lf.packages.length === 0) {
-      blocks.push(header + '\nNo dependency changes.\n');
+      blocks.push(`${header}\nNo dependency changes.\n`);
       continue;
     }
 
     const pkgBlocks = lf.packages.map((p, i) => formatPackage(p, i + 1, lf.packages.length));
-    blocks.push(header + '\n' + pkgBlocks.join('\n'));
+    blocks.push(`${header}\n${pkgBlocks.join('\n')}`);
   }
 
   return blocks.join('\n');

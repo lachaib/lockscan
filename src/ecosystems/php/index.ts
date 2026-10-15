@@ -32,14 +32,6 @@ function stripTopLevel(files: FileMap): FileMap {
   return result;
 }
 
-async function fetchAndExtract(name: string, version: string): Promise<FileMap> {
-  const { meta } = await fetchPackagistWithVersions(name, version);
-  const artifact = getArtifactInfo(meta);
-  if (!artifact) throw new Error(`No downloadable artifact for ${name}@${version} on Packagist`);
-  const data = await downloadArtifact(artifact.url);
-  return stripTopLevel(extractZip(data, PHP_EXTENSIONS));
-}
-
 export class PhpAnalyzer implements EcosystemAnalyzer {
   readonly ecosystem = 'php';
 
