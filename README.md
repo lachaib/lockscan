@@ -201,6 +201,40 @@ Any of these files being added, removed, or modified between the old and new ver
 
 ---
 
+### 13. Code-signature regressions (native binaries)
+
+**What it detects:** A shipped native binary whose embedded code signature disappeared (`binary:signature-dropped`) or changed signer (`binary:signer-changed`) between versions. Both are reported at `high` severity.
+
+**Why it matters:** Projects such as ruff and uv now sign their release executables (Apple Developer ID on macOS, Authenticode on Windows). A previously signed binary that ships unsigned, or under a different publisher, points to a takeover or a build that did not go through the maintainer's signing pipeline.
+
+**How it works:** The signature is parsed from the binary itself, so it applies to every ecosystem that ships binaries (PyPI wheels, npm packages, Deno/JSR). Extensionless executables such as wheel `*.data/scripts/*` and npm `bin/` files are detected by header magic.
+
+| Format | Signature read | Signer identity |
+|---|---|---|
+| Mach-O (thin and universal) | `LC_CODE_SIGNATURE` CMS slot; ad-hoc signatures count as unsigned; every slice of a universal binary must be signed | Apple Team ID |
+| PE (`.exe`, `.dll`, `.pyd`) | Authenticode PKCS#7 in the certificate table | Organization of the signer certificate |
+
+**Limits:** Signatures are parsed and compared, not cryptographically verified: there is no chain, notarization or revocation check, so a signature is never reported as "trusted". Unsigned binaries are never flagged on their own, and gaining a signature is not reported. Signer identities are only compared within the same signing scheme.
+
+---
+
+### 14. Build provenance regressions
+
+**What it detects:** A version whose build attestation disappeared (`high`), whose attested source repository changed (`high`), or whose attested build workflow changed within the same repository (`moderate`), compared with the previous version.
+
+**Why it matters:** Attestations bind a published artifact to the repository and workflow that built it. A maintainer who publishes with provenance and then ships a version without it, or from a different repository, has most likely published from a laptop or a compromised token instead of their release pipeline — the typical shape of an account takeover.
+
+| Ecosystem | Source | Identity compared |
+|---|---|---|
+| npm (and `npm:` in Deno) | `dist.attestations` SLSA provenance (Sigstore) | Source repository + workflow path |
+| PyPI | PEP 740 attestations (Integrity API); every selected artifact must be attested | Trusted Publisher repository + workflow |
+| JSR | Sigstore transparency-log entry (`rekorLogId`) | Presence only |
+| Packagist | No provenance mechanism | Not applicable |
+
+**Limits:** Attestations are read from the registry, not cryptographically verified. A package that never had provenance is not flagged, and gaining provenance is not reported. Registry or network errors count as "unknown", never as "dropped".
+
+---
+
 ## Artifact verification
 
 For every downloaded artifact, `lockscan` verifies the cryptographic hash against the value published by the registry:

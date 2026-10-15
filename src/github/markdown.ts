@@ -46,6 +46,9 @@ function packageSignals(pkg: PackageAnalysis): string[] {
   else if (pkg.registryCheck?.versionShapeSuspicious) signals.push('unusual version number');
   if (pkg.registryCheck?.registryChanged) signals.push('registry changed');
   if (pkg.repoCheck?.releaseDropped) signals.push('release tag dropped');
+  if (pkg.provenanceCheck?.dropped) signals.push('build provenance dropped');
+  if (pkg.provenanceCheck?.sourceChanged) signals.push('provenance source changed');
+  if (pkg.provenanceCheck?.workflowChanged) signals.push('provenance workflow changed');
   if ((pkg.registryInfo?.versionAgeDays ?? Infinity) < 1) signals.push('⚡ fresh publish');
   if (pkg.metadataDelta?.newBinaryWheels) signals.push('new binary wheels');
   if (pkg.metadataDelta?.licenseChanged) signals.push('license changed');

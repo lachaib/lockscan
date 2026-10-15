@@ -171,3 +171,109 @@ export function buildPe(dllName: string, importName: string): Buffer {
 
   return Buffer.concat([dosHeader, coffHeader, optHeader, sectionHeader, blob]);
 }
+
+/** Real PKCS#7 SignedData blobs (openssl cms -sign, self-signed) with subject O=<org>. */
+export const PKCS7_ACME = Buffer.from(
+  'MIID3gYJKoZIhvcNAQcCoIIDzzCCA8sCAQExDTALBglghkgBZQMEAgEwFQYJKoZIhvcNAQcBoAgEBmhlbGxvCqCCAekwggHlMIIBi6ADAgECAhQS5Zst9X5M+xpUs24ozg+diaIFfTAKBggqhkjOPQQDAjBHMQswCQYDVQQGEwJVUzEbMBkGA1UECgwSQWNtZSBTb2Z0d2FyZSBJbmMuMRswGQYDVQQDDBJBY21lIFNvZnR3YXJlIEluYy4wIBcNMjYxMDE1MTI1NjAyWhgPMjEyNjA5MjExMjU2MDJaMEcxCzAJBgNVBAYTAlVTMRswGQYDVQQKDBJBY21lIFNvZnR3YXJlIEluYy4xGzAZBgNVBAMMEkFjbWUgU29mdHdhcmUgSW5jLjBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABH+C2uNKHXDxQVhu6cyAgrBtTlFBeJUz63N9Fna5cV6mF+cJUuiaR8ScXEaSBINFpgJf6nb43rSmJPM5Bg7DJbajUzBRMB0GA1UdDgQWBBTW+snBff8fH7kAvAKQPxul2C5UzTAfBgNVHSMEGDAWgBTW+snBff8fH7kAvAKQPxul2C5UzTAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0gAMEUCIQDVeZIw2gpDIxLtKRaCKzZXckwLJtfNhTtI/GO0l9dVhwIgdiGWmpBhzUIuQy7H/zk7RBz1S4LzHezOO3RT1hSED7MxggGxMIIBrQIBATBfMEcxCzAJBgNVBAYTAlVTMRswGQYDVQQKDBJBY21lIFNvZnR3YXJlIEluYy4xGzAZBgNVBAMMEkFjbWUgU29mdHdhcmUgSW5jLgIUEuWbLfV+TPsaVLNuKM4PnYmiBX0wCwYJYIZIAWUDBAIBoIHkMBgGCSqGSIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MTAxNTEyNTYwMlowLwYJKoZIhvcNAQkEMSIEIFiRtbUi1d8IbQ/wsRD72dIbtPxxY6800IKGouhG9r4DMHkGCSqGSIb3DQEJDzFsMGowCwYJYIZIAWUDBAEqMAsGCWCGSAFlAwQBFjALBglghkgBZQMEAQIwCgYIKoZIhvcNAwcwDgYIKoZIhvcNAwICAgCAMA0GCCqGSIb3DQMCAgFAMAcGBSsOAwIHMA0GCCqGSIb3DQMCAgEoMAoGCCqGSM49BAMCBEcwRQIhANIkWend+4fRC3pbbpB8X6w35G6/7mbUkAMcYHpvhJSRAiB9Yh9LMYyWVEsMbetNVVk+xRH3QIb3cFRkhSIN+Lah1g==',
+  'base64',
+);
+export const PKCS7_EVIL = Buffer.from(
+  'MIIDpwYJKoZIhvcNAQcCoIIDmDCCA5QCAQExDTALBglghkgBZQMEAgEwFQYJKoZIhvcNAQcBoAgEBmhlbGxvCqCCAcUwggHBMIIBZ6ADAgECAhQOUo5rd+T1xqbwX3NK7FBV2QLZfTAKBggqhkjOPQQDAjA1MQswCQYDVQQGEwJVUzESMBAGA1UECgwJRXZpbCBDb3JwMRIwEAYDVQQDDAlFdmlsIENvcnAwIBcNMjYxMDE1MTI1NjAyWhgPMjEyNjA5MjExMjU2MDJaMDUxCzAJBgNVBAYTAlVTMRIwEAYDVQQKDAlFdmlsIENvcnAxEjAQBgNVBAMMCUV2aWwgQ29ycDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABKd9fTfLOJE+doaARWdlh7queLwwASmRWTlkfI+B7gm3Gm9w5aL8I0MRmJa717Vx5OpGzdXiUwy+n8k6YAoN2zSjUzBRMB0GA1UdDgQWBBTJ01qizOa5METFD4VBs+E8KlVc1zAfBgNVHSMEGDAWgBTJ01qizOa5METFD4VBs+E8KlVc1zAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0gAMEUCIFQFWoU+gp5akjslyHDdoaga/OBl1OXrLBMB2H52cgUKAiEAlsxxvQjGzkWa9GMvTjH+6amJ3fg38xuFNmSw3O9JIi8xggGeMIIBmgIBATBNMDUxCzAJBgNVBAYTAlVTMRIwEAYDVQQKDAlFdmlsIENvcnAxEjAQBgNVBAMMCUV2aWwgQ29ycAIUDlKOa3fk9cam8F9zSuxQVdkC2X0wCwYJYIZIAWUDBAIBoIHkMBgGCSqGSIb3DQEJAzELBgkqhkiG9w0BBwEwHAYJKoZIhvcNAQkFMQ8XDTI2MTAxNTEyNTYwMlowLwYJKoZIhvcNAQkEMSIEIFiRtbUi1d8IbQ/wsRD72dIbtPxxY6800IKGouhG9r4DMHkGCSqGSIb3DQEJDzFsMGowCwYJYIZIAWUDBAEqMAsGCWCGSAFlAwQBFjALBglghkgBZQMEAQIwCgYIKoZIhvcNAwcwDgYIKoZIhvcNAwICAgCAMA0GCCqGSIb3DQMCAgFAMAcGBSsOAwIHMA0GCCqGSIb3DQMCAgEoMAoGCCqGSM49BAMCBEYwRAIgJETSpHLQgQXVg5oVJDKxKxtVeOwFPFK8goVcAKmKproCIDoTOFXMGU9KissO28fkIe37sGKNOmIG8qpxmJjllJ0b',
+  'base64',
+);
+
+/**
+ * Build a minimal thin Mach-O 64-bit buffer carrying an LC_CODE_SIGNATURE whose SuperBlob holds a
+ * CodeDirectory (identifier + optional Team ID) and a CMS slot (empty for an ad-hoc signature).
+ */
+export function buildSignedMachO(opts: {
+  identifier: string;
+  teamId?: string;
+  cms: boolean;
+}): Buffer {
+  const identBuf = Buffer.from(`${opts.identifier}\0`, 'ascii');
+  const teamBuf = opts.teamId ? Buffer.from(`${opts.teamId}\0`, 'ascii') : Buffer.alloc(0);
+  const cdHeaderSize = 52;
+  const cd = Buffer.alloc(cdHeaderSize + identBuf.length + teamBuf.length);
+  cd.writeUInt32BE(0xfade0c02, 0); // CSMAGIC_CODEDIRECTORY
+  cd.writeUInt32BE(cd.length, 4);
+  cd.writeUInt32BE(0x20400, 8); // version
+  cd.writeUInt32BE(cdHeaderSize, 20); // identOffset
+  identBuf.copy(cd, cdHeaderSize);
+  if (opts.teamId) {
+    cd.writeUInt32BE(cdHeaderSize + identBuf.length, 48); // teamOffset
+    teamBuf.copy(cd, cdHeaderSize + identBuf.length);
+  }
+
+  const cmsBody = opts.cms ? Buffer.from('30800000', 'hex') : Buffer.alloc(0);
+  const cmsBlob = Buffer.alloc(8 + cmsBody.length);
+  cmsBlob.writeUInt32BE(0xfade0b01, 0); // CSMAGIC_BLOBWRAPPER
+  cmsBlob.writeUInt32BE(cmsBlob.length, 4);
+  cmsBody.copy(cmsBlob, 8);
+
+  const indexSize = 12 + 2 * 8;
+  const superBlob = Buffer.alloc(indexSize);
+  superBlob.writeUInt32BE(0xfade0cc0, 0); // CSMAGIC_EMBEDDED_SIGNATURE
+  superBlob.writeUInt32BE(indexSize + cd.length + cmsBlob.length, 4);
+  superBlob.writeUInt32BE(2, 8); // count
+  superBlob.writeUInt32BE(0, 12); // CSSLOT_CODEDIRECTORY
+  superBlob.writeUInt32BE(indexSize, 16);
+  superBlob.writeUInt32BE(0x10000, 20); // CSSLOT_CMS_SIGNATURE
+  superBlob.writeUInt32BE(indexSize + cd.length, 24);
+  const signature = Buffer.concat([superBlob, cd, cmsBlob]);
+
+  const headerSize = 32;
+  const cmdSize = 16;
+  const header = Buffer.alloc(headerSize);
+  header.writeUInt32LE(0xfeedfacf, 0); // MH_MAGIC_64
+  header.writeUInt32LE(1, 16); // ncmds
+  header.writeUInt32LE(cmdSize, 20);
+  const cmd = Buffer.alloc(cmdSize);
+  cmd.writeUInt32LE(0x1d, 0); // LC_CODE_SIGNATURE
+  cmd.writeUInt32LE(cmdSize, 4);
+  cmd.writeUInt32LE(headerSize + cmdSize, 8); // dataoff
+  cmd.writeUInt32LE(signature.length, 12);
+  return Buffer.concat([header, cmd, signature]);
+}
+
+/** Wrap thin Mach-O slices into a fat (universal) binary. */
+export function buildFatMachO(slices: Buffer[]): Buffer {
+  const header = Buffer.alloc(8 + 20 * slices.length);
+  header.writeUInt32BE(0xcafebabe, 0);
+  header.writeUInt32BE(slices.length, 4);
+  let offset = header.length;
+  slices.forEach((slice, i) => {
+    header.writeUInt32BE(offset, 8 + i * 20 + 8);
+    header.writeUInt32BE(slice.length, 8 + i * 20 + 12);
+    offset += slice.length;
+  });
+  return Buffer.concat([header, ...slices]);
+}
+
+/** Build a minimal PE32+ buffer, optionally carrying an Authenticode PKCS#7 blob in its certificate table. */
+export function buildSignedPe(pkcs7?: Buffer): Buffer {
+  const dosHeader = Buffer.alloc(64);
+  dosHeader.write('MZ', 0, 'ascii');
+  dosHeader.writeUInt32LE(64, 0x3c);
+
+  const optHeaderSize = 240;
+  const coffHeader = Buffer.alloc(24);
+  coffHeader.writeUInt32LE(0x00004550, 0);
+  coffHeader.writeUInt16LE(optHeaderSize, 4 + 16);
+
+  const optHeader = Buffer.alloc(optHeaderSize);
+  optHeader.writeUInt16LE(0x20b, 0);
+
+  const prefix = Buffer.concat([dosHeader, coffHeader, optHeader]);
+  if (!pkcs7) return prefix;
+
+  const certLength = 8 + pkcs7.length;
+  const winCert = Buffer.alloc(8);
+  winCert.writeUInt32LE(certLength, 0);
+  winCert.writeUInt16LE(0x0200, 4); // wRevision
+  winCert.writeUInt16LE(0x0002, 6); // wCertificateType = PKCS_SIGNED_DATA
+  // Certificate Table is data directory index 4; its "address" is a raw file offset.
+  prefix.writeUInt32LE(prefix.length, 64 + 24 + 112 + 4 * 8);
+  prefix.writeUInt32LE(certLength, 64 + 24 + 112 + 4 * 8 + 4);
+  return Buffer.concat([prefix, winCert, pkcs7]);
+}

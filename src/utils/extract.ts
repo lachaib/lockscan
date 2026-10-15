@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promi
 import { extname, join, relative } from 'node:path';
 import AdmZip from 'adm-zip';
 import * as tar from 'tar';
+import { isNativeBinary } from '../ecosystems/shared/binary-formats.js';
 
 export type FileMap = Map<string, string>;
 
@@ -43,19 +44,30 @@ export async function extractTarball(
 }
 
 /** Compiled native extensions — structurally ELF/Mach-O/PE regardless of the ecosystem's own extension convention. */
-const BINARY_EXTENSIONS = new Set(['.so', '.pyd', '.dylib', '.dll', '.node']);
+const BINARY_EXTENSIONS = new Set(['.so', '.pyd', '.dylib', '.dll', '.node', '.exe']);
+
+/** Extensionless files below this size are never native executables; skip reading them. */
+const MIN_EXECUTABLE_SIZE = 1024;
+
+/** Wheel `<name>-<version>.data/` directories embed the version; normalize so old/new entries line up. */
+const WHEEL_DATA_DIR = /^[^/]+\.data\//;
 
 /**
  * Extracts compiled binary extensions from a .whl (zip) archive in-memory.
- * Returns a map of entry name → raw bytes for .so/.pyd/.dylib/.dll/.node files.
+ * Returns a map of entry name → raw bytes for native extensions and extensionless executables
+ * (e.g. `*.data/scripts/ruff`), detected by header magic.
  */
 export function extractZipBinaries(data: Buffer): Map<string, Buffer> {
   const files = new Map<string, Buffer>();
   const zip = new AdmZip(data);
   for (const entry of zip.getEntries()) {
     if (entry.isDirectory) continue;
-    if (!BINARY_EXTENSIONS.has(extname(entry.entryName))) continue;
-    files.set(entry.entryName, entry.getData());
+    const ext = extname(entry.entryName);
+    const isExtensionlessCandidate = ext === '' && entry.header.size >= MIN_EXECUTABLE_SIZE;
+    if (!BINARY_EXTENSIONS.has(ext) && !isExtensionlessCandidate) continue;
+    const content = entry.getData();
+    if (isExtensionlessCandidate && !isNativeBinary(content)) continue;
+    files.set(entry.entryName.replace(WHEEL_DATA_DIR, '.data/'), content);
   }
   return files;
 }
@@ -71,6 +83,15 @@ export async function extractTarballBinaries(
 ): Promise<Map<string, Buffer>> {
   const files = new Map<string, Buffer>();
   await walkDir(destDir, destDir, extensions, files, (path) => readFile(path), BINARY_SKIP_DIRS);
+  await walkDir(
+    destDir,
+    destDir,
+    new Set(['']),
+    files,
+    (path) => readFile(path),
+    BINARY_SKIP_DIRS,
+    (content) => content.length >= MIN_EXECUTABLE_SIZE && isNativeBinary(content),
+  );
   return files;
 }
 
@@ -106,6 +127,7 @@ async function walkDir<T>(
   files: Map<string, T>,
   readAs: (path: string) => Promise<T>,
   skipDirs: Set<string>,
+  accept: (content: T) => boolean = () => true,
 ): Promise<void> {
   let entries: string[];
   try {
@@ -125,12 +147,13 @@ async function walkDir<T>(
 
     if (s.isDirectory()) {
       if (!skipDirs.has(entry)) {
-        await walkDir(baseDir, fullPath, extensions, files, readAs, skipDirs);
+        await walkDir(baseDir, fullPath, extensions, files, readAs, skipDirs, accept);
       }
     } else if (extensions.has(extname(entry))) {
       const rel = relative(baseDir, fullPath);
       try {
-        files.set(rel, await readAs(fullPath));
+        const content = await readAs(fullPath);
+        if (accept(content)) files.set(rel, content);
       } catch {
         // skip unreadable files
       }

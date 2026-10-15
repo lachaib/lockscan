@@ -11,6 +11,7 @@ import type { AnalysisOptions, EcosystemAnalyzer } from '../base.js';
 import { type BinaryScan, binaryFindingsDelta, scanBinary } from '../shared/binary-scan.js';
 import { diffFiles } from '../shared/diff.js';
 import { annotateHooks, detectPythonWheelHooks } from '../shared/install-hooks.js';
+import { compareProvenance } from '../shared/provenance-check.js';
 import { checkRegistry } from '../shared/registry-check.js';
 import { checkRepoRelease } from '../shared/repo-check.js';
 import { findingsDelta, scanPatterns } from '../shared/scan.js';
@@ -21,6 +22,7 @@ import {
   extractRegistryInfo,
   extractRepoUrl,
   fetchPyPI,
+  fetchPyPIProvenance,
   type PyPIArtifact,
   selectArtifacts,
 } from './pypi.js';
@@ -65,7 +67,8 @@ function mergeBinaryScans(scans: WheelScan[]): Map<string, BinaryScan> {
   const merged = new Map<string, BinaryScan>();
   for (const { binaryScans } of scans) {
     for (const [filename, scan] of binaryScans) {
-      if (!merged.has(filename)) merged.set(filename, scan);
+      const existing = merged.get(filename);
+      if (!existing || (!existing.signature && scan.signature)) merged.set(filename, scan);
     }
   }
   return merged;
@@ -250,7 +253,7 @@ export class PythonAnalyzer implements EcosystemAnalyzer {
     }
 
     // both versions have artifacts — scan old, scan new, and check repo all at once
-    const [newScans, oldScans, repoCheck] = await Promise.all([
+    const [newScans, oldScans, repoCheck, oldProvenance, newProvenance] = await Promise.all([
       scanArtifacts(newArtifacts, tmpDir, `${name}_${new_version}_new`),
       scanArtifacts(oldArtifacts, tmpDir, `${name}_${old_version}_old`),
       checkRepoRelease({
@@ -259,7 +262,10 @@ export class PythonAnalyzer implements EcosystemAnalyzer {
         oldVersion: old_version,
         newVersion: new_version,
       }),
+      fetchPyPIProvenance(name, old_version, oldArtifacts),
+      fetchPyPIProvenance(name, new_version, newArtifacts),
     ]);
+    const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
 
     const newDerived = deriveFindings(newScans);
     const oldDerived = deriveFindings(oldScans);
@@ -292,6 +298,7 @@ export class PythonAnalyzer implements EcosystemAnalyzer {
       ...(binaryDelta.length > 0 && { binaryFindings: { delta: binaryDelta } }),
       ...(annotated.length > 0 && { installHooks: annotated }),
       ...(repoCheck && { repoCheck }),
+      ...(provenanceCheck && { provenanceCheck }),
       ...(registryCheck && { registryCheck }),
     };
   }

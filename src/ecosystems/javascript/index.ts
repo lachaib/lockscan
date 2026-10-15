@@ -22,6 +22,7 @@ function checkNpmNativeBuild(oldFiles: FileMap, newFiles: FileMap): boolean {
 }
 
 import { annotateHooks, detectNpmHooks } from '../shared/install-hooks.js';
+import { compareProvenance } from '../shared/provenance-check.js';
 import { checkRegistry } from '../shared/registry-check.js';
 import { checkRepoRelease } from '../shared/repo-check.js';
 import {
@@ -29,6 +30,7 @@ import {
   downloadNpmTarball,
   extractRegistryInfo,
   extractRepoUrl,
+  fetchNpmProvenance,
   fetchNpmVersion,
   getArtifactInfo,
 } from './npm.js';
@@ -127,7 +129,7 @@ export class JavaScriptAnalyzer implements EcosystemAnalyzer {
     const oldArtifact = getArtifactInfo(oldMeta);
     const repoUrl = extractRepoUrl(newMeta);
 
-    const [newScan, oldScan, repoCheck] = await Promise.all([
+    const [newScan, oldScan, repoCheck, oldProvenance, newProvenance] = await Promise.all([
       download(new_version!, 'new')(newArtifact.url),
       download(old_version!, 'old')(oldArtifact.url),
       checkRepoRelease({
@@ -136,7 +138,10 @@ export class JavaScriptAnalyzer implements EcosystemAnalyzer {
         oldVersion: old_version,
         newVersion: new_version,
       }),
+      fetchNpmProvenance(oldMeta),
+      fetchNpmProvenance(newMeta),
     ]);
+    const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
 
     const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS);
     const oldFindings = scanPatterns(oldScan.files, DANGEROUS_PATTERNS);
@@ -167,6 +172,7 @@ export class JavaScriptAnalyzer implements EcosystemAnalyzer {
       ...(binaryDelta.length > 0 && { binaryFindings: { delta: binaryDelta } }),
       ...(annotated.length > 0 && { installHooks: annotated }),
       ...(repoCheck && { repoCheck }),
+      ...(provenanceCheck && { provenanceCheck }),
       ...(registryCheck && { registryCheck }),
     };
   }

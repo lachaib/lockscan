@@ -22015,8 +22015,8 @@ var require_adm_zip = __commonJS({
           var entryName = canonical(item.entryName);
           var target = sanitize(targetPath, outFileName && !item.isDirectory ? outFileName : maintainEntryPath ? entryName : pth.basename(entryName));
           if (item.isDirectory) {
-            var children = _zip.getEntryChildren(item);
-            children.forEach(function(child) {
+            var children2 = _zip.getEntryChildren(item);
+            children2.forEach(function(child) {
               if (child.isDirectory) return;
               var content2 = child.getData();
               if (!content2) {
@@ -26600,6 +26600,7 @@ function effectivePatternSeverity(label, oldCount, newCount) {
 function binaryFindingSeverity(label) {
   if (label === "binary:sensitive-path" || label === "binary:url-other-scheme") return "high";
   if (label === "binary:high-entropy" || label.startsWith("native:")) return "high";
+  if (label === "binary:signature-dropped" || label === "binary:signer-changed") return "high";
   if (label === "binary:url-http" || label === "binary:ip-v4" || label === "binary:ip-v6" || label === "binary:tmppath")
     return "moderate";
   if (label === "binary:base64") return "low";
@@ -26625,6 +26626,8 @@ function packageMaxSeverity(pkg) {
   if (pkg.securityFindings?.platformDivergence) s3 = higher(s3, "high");
   if (pkg.metadataDelta?.publisherChanged) s3 = higher(s3, "high");
   if (pkg.metadataDelta?.buildSystemChanged) s3 = higher(s3, "high");
+  if (pkg.provenanceCheck?.dropped || pkg.provenanceCheck?.sourceChanged) s3 = higher(s3, "high");
+  if (pkg.provenanceCheck?.workflowChanged) s3 = higher(s3, "moderate");
   if (pkg.installHooks?.some((h) => h.isNew)) s3 = higher(s3, "high");
   if (pkg.registryCheck?.potentialConfusion) s3 = higher(s3, "critical");
   else if (pkg.registryCheck?.versionShapeSuspicious) s3 = higher(s3, "low");
@@ -26764,6 +26767,9 @@ function buildSignals(pkg) {
   else if (pkg.registryCheck?.versionShapeSuspicious) signals.push("unusual version number");
   if (pkg.registryCheck?.registryChanged) signals.push("registry changed");
   if (pkg.repoCheck?.releaseDropped) signals.push("release tag dropped");
+  if (pkg.provenanceCheck?.dropped) signals.push("build provenance dropped");
+  if (pkg.provenanceCheck?.sourceChanged) signals.push("provenance source changed");
+  if (pkg.provenanceCheck?.workflowChanged) signals.push("provenance workflow changed");
   if ((pkg.registryInfo?.versionAgeDays ?? Infinity) < 1) signals.push("fresh publish (<24h)");
   if (pkg.metadataDelta?.newBinaryWheels) signals.push("new binary wheels");
   if (pkg.metadataDelta?.licenseChanged) signals.push("license changed");
@@ -26836,6 +26842,9 @@ function packageSignals(pkg) {
   else if (pkg.registryCheck?.versionShapeSuspicious) signals.push("unusual version number");
   if (pkg.registryCheck?.registryChanged) signals.push("registry changed");
   if (pkg.repoCheck?.releaseDropped) signals.push("release tag dropped");
+  if (pkg.provenanceCheck?.dropped) signals.push("build provenance dropped");
+  if (pkg.provenanceCheck?.sourceChanged) signals.push("provenance source changed");
+  if (pkg.provenanceCheck?.workflowChanged) signals.push("provenance workflow changed");
   if ((pkg.registryInfo?.versionAgeDays ?? Infinity) < 1) signals.push("\u26A1 fresh publish");
   if (pkg.metadataDelta?.newBinaryWheels) signals.push("new binary wheels");
   if (pkg.metadataDelta?.licenseChanged) signals.push("license changed");
@@ -27211,6 +27220,16 @@ function resultsForPackage(pkg, ecosystem, lockfilePath, workspace) {
       message: {
         text: `${pkg.name} (${versionStr}) has no release tag in ${pkg.repoCheck.repoUrl} \u2014 the previous version did`
       },
+      locations: [loc]
+    });
+  }
+  if (pkg.provenanceCheck) {
+    const pc = pkg.provenanceCheck;
+    const text = pc.dropped ? `${pkg.name} (${versionStr}) has no build provenance attestation \u2014 the previous version did` : pc.sourceChanged ? `${pkg.name} (${versionStr}) was built from ${pc.new.source}, previously ${pc.old.source}` : `${pkg.name} (${versionStr}) was built by workflow ${pc.new.workflow}, previously ${pc.old.workflow}`;
+    results.push({
+      ruleId: "lockscan/provenance-regression",
+      level: pc.workflowChanged ? "warning" : "error",
+      message: { text },
       locations: [loc]
     });
   }
@@ -30201,202 +30220,6 @@ var Ro = (s3) => {
   s3.mtimeCache || (s3.mtimeCache = /* @__PURE__ */ new Map()), s3.filter = t ? (e, i) => t(e, i) && !((s3.mtimeCache?.get(e) ?? i.mtime ?? 0) > (i.mtime ?? 0)) : (e, i) => !((s3.mtimeCache?.get(e) ?? i.mtime ?? 0) > (i.mtime ?? 0));
 };
 
-// src/utils/extract.ts
-var SKIP_DIRS = /* @__PURE__ */ new Set([
-  "__pycache__",
-  ".git",
-  "node_modules",
-  ".mypy_cache",
-  "dist",
-  "build",
-  ".pytest_cache",
-  ".ruff_cache"
-]);
-var BINARY_SKIP_DIRS = /* @__PURE__ */ new Set([".git", "node_modules"]);
-async function extractTarball(data, destDir, fileExtensions) {
-  await (0, import_promises2.mkdir)(destDir, { recursive: true });
-  const tmpFile = `${destDir}.__archive.tgz`;
-  await (0, import_promises2.writeFile)(tmpFile, data);
-  try {
-    await uo({ file: tmpFile, cwd: destDir, strip: 1 });
-  } finally {
-    await (0, import_promises2.unlink)(tmpFile).catch(() => {
-    });
-  }
-  return collectFiles(destDir, fileExtensions);
-}
-var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([".so", ".pyd", ".dylib", ".dll", ".node"]);
-function extractZipBinaries(data) {
-  const files = /* @__PURE__ */ new Map();
-  const zip = new import_adm_zip.default(data);
-  for (const entry of zip.getEntries()) {
-    if (entry.isDirectory) continue;
-    if (!BINARY_EXTENSIONS.has((0, import_node_path11.extname)(entry.entryName))) continue;
-    files.set(entry.entryName, entry.getData());
-  }
-  return files;
-}
-async function extractTarballBinaries(destDir, extensions = BINARY_EXTENSIONS) {
-  const files = /* @__PURE__ */ new Map();
-  await walkDir(destDir, destDir, extensions, files, (path) => (0, import_promises2.readFile)(path), BINARY_SKIP_DIRS);
-  return files;
-}
-function extractZip(data, fileExtensions) {
-  const files = /* @__PURE__ */ new Map();
-  const zip = new import_adm_zip.default(data);
-  for (const entry of zip.getEntries()) {
-    if (entry.isDirectory) continue;
-    if (!fileExtensions.has((0, import_node_path11.extname)(entry.entryName))) continue;
-    try {
-      files.set(entry.entryName, entry.getData().toString("utf8"));
-    } catch {
-    }
-  }
-  return files;
-}
-async function collectFiles(dir, extensions) {
-  const files = /* @__PURE__ */ new Map();
-  await walkDir(dir, dir, extensions, files, (path) => (0, import_promises2.readFile)(path, "utf8"), SKIP_DIRS);
-  return files;
-}
-async function walkDir(baseDir, currentDir, extensions, files, readAs, skipDirs) {
-  let entries;
-  try {
-    entries = await (0, import_promises2.readdir)(currentDir);
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    const fullPath = (0, import_node_path11.join)(currentDir, entry);
-    let s3;
-    try {
-      s3 = await (0, import_promises2.stat)(fullPath);
-    } catch {
-      continue;
-    }
-    if (s3.isDirectory()) {
-      if (!skipDirs.has(entry)) {
-        await walkDir(baseDir, fullPath, extensions, files, readAs, skipDirs);
-      }
-    } else if (extensions.has((0, import_node_path11.extname)(entry))) {
-      const rel = (0, import_node_path11.relative)(baseDir, fullPath);
-      try {
-        files.set(rel, await readAs(fullPath));
-      } catch {
-      }
-    }
-  }
-}
-
-// src/utils/http.ts
-async function fetchJson(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}: ${url}`);
-  return res.json();
-}
-async function downloadBuffer(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}: ${url}`);
-  return Buffer.from(await res.arrayBuffer());
-}
-
-// src/ecosystems/javascript/npm.ts
-async function fetchNpmVersion(name, version) {
-  const encoded = encodeNpmName(name);
-  return fetchJson(`https://registry.npmjs.org/${encoded}/${version}`);
-}
-async function fetchNpmPackage(name) {
-  const encoded = encodeNpmName(name);
-  const res = await fetch(`https://registry.npmjs.org/${encoded}`, {
-    headers: { Accept: "application/vnd.npm.install-v1+json" }
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}: registry.npmjs.org/${encoded}`);
-  return res.json();
-}
-function encodeNpmName(name) {
-  return name.startsWith("@") ? `@${encodeURIComponent(name.slice(1))}` : name;
-}
-function extractRepoUrl(meta) {
-  if (!meta.repository) return void 0;
-  return typeof meta.repository === "string" ? meta.repository : meta.repository.url;
-}
-function getArtifactInfo(meta) {
-  const filename = meta.dist.tarball.split("/").pop() ?? `${meta.name}-${meta.version}.tgz`;
-  return { filename, url: meta.dist.tarball, sha256: meta.dist.shasum };
-}
-async function downloadNpmTarball(url) {
-  return downloadBuffer(url);
-}
-async function extractRegistryInfo(meta) {
-  const authorName = typeof meta.author === "string" ? meta.author : meta.author?.name;
-  const authorEmail = typeof meta.author === "object" ? meta.author?.email : void 0;
-  const license = typeof meta.license === "string" ? meta.license : meta.license?.type;
-  let firstUpload;
-  let ageDays;
-  let numReleases;
-  let versionUpload;
-  let versionAgeDays;
-  try {
-    const pkg = await fetchNpmPackage(meta.name);
-    if (pkg.time) {
-      const versionTimes = Object.entries(pkg.time).filter(([k2]) => !["created", "modified"].includes(k2)).map(([, v2]) => v2).sort();
-      numReleases = versionTimes.length;
-      firstUpload = versionTimes[0];
-      if (firstUpload) {
-        ageDays = Math.floor((Date.now() - new Date(firstUpload).getTime()) / 864e5);
-      }
-      versionUpload = pkg.time[meta.version];
-      if (versionUpload) {
-        versionAgeDays = Math.floor((Date.now() - new Date(versionUpload).getTime()) / 864e5);
-      }
-    }
-  } catch {
-  }
-  return {
-    summary: meta.description,
-    author: authorName,
-    authorEmail,
-    homepage: meta.homepage,
-    license,
-    numReleases,
-    firstUpload,
-    ageDays,
-    versionUpload,
-    versionAgeDays,
-    latestVersion: meta.version,
-    requiresDist: [
-      ...Object.keys(meta.dependencies ?? {}),
-      ...Object.keys(meta.devDependencies ?? {}).map((k2) => `${k2} (dev)`)
-    ]
-  };
-}
-function licenseString(m2) {
-  if (!m2.license) return "";
-  return typeof m2.license === "string" ? m2.license : m2.license.type;
-}
-function computeMetadataDelta(oldMeta, newMeta) {
-  const getEmail = (m2) => typeof m2.author === "object" ? m2.author?.email ?? "" : "";
-  const oldDeps = /* @__PURE__ */ new Set([
-    ...Object.keys(oldMeta.dependencies ?? {}),
-    ...Object.keys(oldMeta.devDependencies ?? {}).map((k2) => `${k2} (dev)`)
-  ]);
-  const newDeps = /* @__PURE__ */ new Set([
-    ...Object.keys(newMeta.dependencies ?? {}),
-    ...Object.keys(newMeta.devDependencies ?? {}).map((k2) => `${k2} (dev)`)
-  ]);
-  const oldPublisher = oldMeta._npmUser?.name ?? oldMeta._npmUser?.email;
-  const newPublisher = newMeta._npmUser?.name ?? newMeta._npmUser?.email;
-  const publisherChanged = oldPublisher !== void 0 && newPublisher !== void 0 && oldPublisher !== newPublisher ? true : void 0;
-  return {
-    authorChanged: getEmail(oldMeta) !== getEmail(newMeta),
-    homepageChanged: (oldMeta.homepage ?? "") !== (newMeta.homepage ?? ""),
-    depsAdded: [...newDeps].filter((d) => !oldDeps.has(d)),
-    depsRemoved: [...oldDeps].filter((d) => !newDeps.has(d)),
-    licenseChanged: licenseString(oldMeta) !== licenseString(newMeta),
-    ...publisherChanged !== void 0 && { publisherChanged }
-  };
-}
-
 // src/ecosystems/shared/binary-formats.ts
 function extractImportedSymbols(data) {
   try {
@@ -30413,6 +30236,18 @@ function extractImportedSymbols(data) {
   } catch {
     return [];
   }
+}
+function isNativeBinary(data) {
+  if (data.length < 64) return false;
+  const magic = data.readUInt32LE(0);
+  if (magic === ELF_MAGIC || magic === MH_MAGIC || magic === MH_MAGIC_64) return true;
+  const fatMagic = data.readUInt32BE(0);
+  if (fatMagic === FAT_MAGIC || fatMagic === FAT_MAGIC_64) return data.readUInt32BE(4) <= 30;
+  if (data[0] === 77 && data[1] === 90) {
+    const peOffset = data.readUInt32LE(60);
+    return peOffset + 4 <= data.length && data.readUInt32LE(peOffset) === 17744;
+  }
+  return false;
 }
 function readCString(data, offset) {
   if (offset < 0 || offset >= data.length) return "";
@@ -30621,6 +30456,415 @@ function parsePeImports(data) {
   return names;
 }
 
+// src/utils/extract.ts
+var SKIP_DIRS = /* @__PURE__ */ new Set([
+  "__pycache__",
+  ".git",
+  "node_modules",
+  ".mypy_cache",
+  "dist",
+  "build",
+  ".pytest_cache",
+  ".ruff_cache"
+]);
+var BINARY_SKIP_DIRS = /* @__PURE__ */ new Set([".git", "node_modules"]);
+async function extractTarball(data, destDir, fileExtensions) {
+  await (0, import_promises2.mkdir)(destDir, { recursive: true });
+  const tmpFile = `${destDir}.__archive.tgz`;
+  await (0, import_promises2.writeFile)(tmpFile, data);
+  try {
+    await uo({ file: tmpFile, cwd: destDir, strip: 1 });
+  } finally {
+    await (0, import_promises2.unlink)(tmpFile).catch(() => {
+    });
+  }
+  return collectFiles(destDir, fileExtensions);
+}
+var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([".so", ".pyd", ".dylib", ".dll", ".node", ".exe"]);
+var MIN_EXECUTABLE_SIZE = 1024;
+var WHEEL_DATA_DIR = /^[^/]+\.data\//;
+function extractZipBinaries(data) {
+  const files = /* @__PURE__ */ new Map();
+  const zip = new import_adm_zip.default(data);
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue;
+    const ext = (0, import_node_path11.extname)(entry.entryName);
+    const isExtensionlessCandidate = ext === "" && entry.header.size >= MIN_EXECUTABLE_SIZE;
+    if (!BINARY_EXTENSIONS.has(ext) && !isExtensionlessCandidate) continue;
+    const content = entry.getData();
+    if (isExtensionlessCandidate && !isNativeBinary(content)) continue;
+    files.set(entry.entryName.replace(WHEEL_DATA_DIR, ".data/"), content);
+  }
+  return files;
+}
+async function extractTarballBinaries(destDir, extensions = BINARY_EXTENSIONS) {
+  const files = /* @__PURE__ */ new Map();
+  await walkDir(destDir, destDir, extensions, files, (path) => (0, import_promises2.readFile)(path), BINARY_SKIP_DIRS);
+  await walkDir(
+    destDir,
+    destDir,
+    /* @__PURE__ */ new Set([""]),
+    files,
+    (path) => (0, import_promises2.readFile)(path),
+    BINARY_SKIP_DIRS,
+    (content) => content.length >= MIN_EXECUTABLE_SIZE && isNativeBinary(content)
+  );
+  return files;
+}
+function extractZip(data, fileExtensions) {
+  const files = /* @__PURE__ */ new Map();
+  const zip = new import_adm_zip.default(data);
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue;
+    if (!fileExtensions.has((0, import_node_path11.extname)(entry.entryName))) continue;
+    try {
+      files.set(entry.entryName, entry.getData().toString("utf8"));
+    } catch {
+    }
+  }
+  return files;
+}
+async function collectFiles(dir, extensions) {
+  const files = /* @__PURE__ */ new Map();
+  await walkDir(dir, dir, extensions, files, (path) => (0, import_promises2.readFile)(path, "utf8"), SKIP_DIRS);
+  return files;
+}
+async function walkDir(baseDir, currentDir, extensions, files, readAs, skipDirs, accept = () => true) {
+  let entries;
+  try {
+    entries = await (0, import_promises2.readdir)(currentDir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const fullPath = (0, import_node_path11.join)(currentDir, entry);
+    let s3;
+    try {
+      s3 = await (0, import_promises2.stat)(fullPath);
+    } catch {
+      continue;
+    }
+    if (s3.isDirectory()) {
+      if (!skipDirs.has(entry)) {
+        await walkDir(baseDir, fullPath, extensions, files, readAs, skipDirs, accept);
+      }
+    } else if (extensions.has((0, import_node_path11.extname)(entry))) {
+      const rel = (0, import_node_path11.relative)(baseDir, fullPath);
+      try {
+        const content = await readAs(fullPath);
+        if (accept(content)) files.set(rel, content);
+      } catch {
+      }
+    }
+  }
+}
+
+// src/utils/http.ts
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}: ${url}`);
+  return res.json();
+}
+async function downloadBuffer(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}: ${url}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+// src/ecosystems/javascript/npm.ts
+async function fetchNpmVersion(name, version) {
+  const encoded = encodeNpmName(name);
+  return fetchJson(`https://registry.npmjs.org/${encoded}/${version}`);
+}
+async function fetchNpmProvenance(meta) {
+  const att = meta.dist.attestations;
+  if (!att?.provenance) return { attested: false };
+  try {
+    const bundle = await fetchJson(att.url);
+    const slsa = bundle.attestations?.find(
+      (a) => a.predicateType.startsWith("https://slsa.dev/provenance/")
+    );
+    const payload = slsa?.bundle?.dsseEnvelope?.payload;
+    if (!payload) return { attested: true };
+    const statement = JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
+    const workflow = statement.predicate?.buildDefinition?.externalParameters?.workflow;
+    return { attested: true, source: workflow?.repository, workflow: workflow?.path };
+  } catch {
+    return { attested: true };
+  }
+}
+async function fetchNpmPackage(name) {
+  const encoded = encodeNpmName(name);
+  const res = await fetch(`https://registry.npmjs.org/${encoded}`, {
+    headers: { Accept: "application/vnd.npm.install-v1+json" }
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}: registry.npmjs.org/${encoded}`);
+  return res.json();
+}
+function encodeNpmName(name) {
+  return name.startsWith("@") ? `@${encodeURIComponent(name.slice(1))}` : name;
+}
+function extractRepoUrl(meta) {
+  if (!meta.repository) return void 0;
+  return typeof meta.repository === "string" ? meta.repository : meta.repository.url;
+}
+function getArtifactInfo(meta) {
+  const filename = meta.dist.tarball.split("/").pop() ?? `${meta.name}-${meta.version}.tgz`;
+  return { filename, url: meta.dist.tarball, sha256: meta.dist.shasum };
+}
+async function downloadNpmTarball(url) {
+  return downloadBuffer(url);
+}
+async function extractRegistryInfo(meta) {
+  const authorName = typeof meta.author === "string" ? meta.author : meta.author?.name;
+  const authorEmail = typeof meta.author === "object" ? meta.author?.email : void 0;
+  const license = typeof meta.license === "string" ? meta.license : meta.license?.type;
+  let firstUpload;
+  let ageDays;
+  let numReleases;
+  let versionUpload;
+  let versionAgeDays;
+  try {
+    const pkg = await fetchNpmPackage(meta.name);
+    if (pkg.time) {
+      const versionTimes = Object.entries(pkg.time).filter(([k2]) => !["created", "modified"].includes(k2)).map(([, v2]) => v2).sort();
+      numReleases = versionTimes.length;
+      firstUpload = versionTimes[0];
+      if (firstUpload) {
+        ageDays = Math.floor((Date.now() - new Date(firstUpload).getTime()) / 864e5);
+      }
+      versionUpload = pkg.time[meta.version];
+      if (versionUpload) {
+        versionAgeDays = Math.floor((Date.now() - new Date(versionUpload).getTime()) / 864e5);
+      }
+    }
+  } catch {
+  }
+  return {
+    summary: meta.description,
+    author: authorName,
+    authorEmail,
+    homepage: meta.homepage,
+    license,
+    numReleases,
+    firstUpload,
+    ageDays,
+    versionUpload,
+    versionAgeDays,
+    latestVersion: meta.version,
+    requiresDist: [
+      ...Object.keys(meta.dependencies ?? {}),
+      ...Object.keys(meta.devDependencies ?? {}).map((k2) => `${k2} (dev)`)
+    ]
+  };
+}
+function licenseString(m2) {
+  if (!m2.license) return "";
+  return typeof m2.license === "string" ? m2.license : m2.license.type;
+}
+function computeMetadataDelta(oldMeta, newMeta) {
+  const getEmail = (m2) => typeof m2.author === "object" ? m2.author?.email ?? "" : "";
+  const oldDeps = /* @__PURE__ */ new Set([
+    ...Object.keys(oldMeta.dependencies ?? {}),
+    ...Object.keys(oldMeta.devDependencies ?? {}).map((k2) => `${k2} (dev)`)
+  ]);
+  const newDeps = /* @__PURE__ */ new Set([
+    ...Object.keys(newMeta.dependencies ?? {}),
+    ...Object.keys(newMeta.devDependencies ?? {}).map((k2) => `${k2} (dev)`)
+  ]);
+  const oldPublisher = oldMeta._npmUser?.name ?? oldMeta._npmUser?.email;
+  const newPublisher = newMeta._npmUser?.name ?? newMeta._npmUser?.email;
+  const publisherChanged = oldPublisher !== void 0 && newPublisher !== void 0 && oldPublisher !== newPublisher ? true : void 0;
+  return {
+    authorChanged: getEmail(oldMeta) !== getEmail(newMeta),
+    homepageChanged: (oldMeta.homepage ?? "") !== (newMeta.homepage ?? ""),
+    depsAdded: [...newDeps].filter((d) => !oldDeps.has(d)),
+    depsRemoved: [...oldDeps].filter((d) => !newDeps.has(d)),
+    licenseChanged: licenseString(oldMeta) !== licenseString(newMeta),
+    ...publisherChanged !== void 0 && { publisherChanged }
+  };
+}
+
+// src/ecosystems/shared/binary-signature.ts
+var import_node_crypto2 = require("crypto");
+function extractCodeSignature(data) {
+  try {
+    if (data.length < 4) return void 0;
+    const magic = data.readUInt32LE(0);
+    if (magic === MH_MAGIC2 || magic === MH_MAGIC_642) return machoSignature(data, 0, data.length);
+    const fatMagic = data.readUInt32BE(0);
+    if (fatMagic === FAT_MAGIC2 || fatMagic === FAT_MAGIC_642) {
+      return fatMachoSignature(data, fatMagic === FAT_MAGIC_642);
+    }
+    if (data[0] === 77 && data[1] === 90) return peSignature(data);
+    return void 0;
+  } catch {
+    return void 0;
+  }
+}
+var MH_MAGIC2 = 4277009102;
+var MH_MAGIC_642 = 4277009103;
+var FAT_MAGIC2 = 3405691582;
+var FAT_MAGIC_642 = 3405691583;
+var LC_CODE_SIGNATURE = 29;
+var CSMAGIC_EMBEDDED_SIGNATURE = 4208856256;
+var CSMAGIC_CODEDIRECTORY = 4208856066;
+var CSSLOT_CODEDIRECTORY = 0;
+var CSSLOT_CMS_SIGNATURE = 65536;
+var CS_SUPPORTSTEAMID = 131584;
+function fatMachoSignature(data, is64Arch) {
+  const nfatArch = data.readUInt32BE(4);
+  const entrySize = is64Arch ? 32 : 20;
+  let first;
+  for (let i = 0; i < nfatArch; i++) {
+    const base = 8 + i * entrySize;
+    if (base + entrySize > data.length) return void 0;
+    const offset = is64Arch ? Number(data.readBigUInt64BE(base + 8)) : data.readUInt32BE(base + 8);
+    const size = is64Arch ? Number(data.readBigUInt64BE(base + 16)) : data.readUInt32BE(base + 12);
+    if (size <= 0 || offset + size > data.length) return void 0;
+    const sig = machoSignature(data, offset, offset + size);
+    if (!sig) return void 0;
+    first ??= sig;
+  }
+  return first;
+}
+function machoSignature(data, start, end) {
+  if (start + 4 > end) return void 0;
+  const magic = data.readUInt32LE(start);
+  if (magic !== MH_MAGIC2 && magic !== MH_MAGIC_642) return void 0;
+  const headerSize = magic === MH_MAGIC_642 ? 32 : 28;
+  if (start + headerSize > end) return void 0;
+  const ncmds = data.readUInt32LE(start + 16);
+  let cmdPtr = start + headerSize;
+  for (let i = 0; i < ncmds; i++) {
+    if (cmdPtr + 8 > end) return void 0;
+    const cmd = data.readUInt32LE(cmdPtr);
+    const cmdsize = data.readUInt32LE(cmdPtr + 4);
+    if (cmdsize < 8 || cmdPtr + cmdsize > end) return void 0;
+    if (cmd === LC_CODE_SIGNATURE && cmdsize >= 16) {
+      const dataoff = start + data.readUInt32LE(cmdPtr + 8);
+      const datasize = data.readUInt32LE(cmdPtr + 12);
+      if (dataoff + datasize > end) return void 0;
+      return parseEmbeddedSignature(data.subarray(dataoff, dataoff + datasize));
+    }
+    cmdPtr += cmdsize;
+  }
+  return void 0;
+}
+function parseEmbeddedSignature(blob) {
+  if (blob.length < 12 || blob.readUInt32BE(0) !== CSMAGIC_EMBEDDED_SIGNATURE) return void 0;
+  const count = blob.readUInt32BE(8);
+  let hasCms = false;
+  let identity;
+  for (let i = 0; i < count; i++) {
+    const entry = 12 + i * 8;
+    if (entry + 8 > blob.length) break;
+    const type = blob.readUInt32BE(entry);
+    const offset = blob.readUInt32BE(entry + 4);
+    if (offset + 8 > blob.length) continue;
+    if (type === CSSLOT_CMS_SIGNATURE) {
+      hasCms = blob.readUInt32BE(offset + 4) > 8;
+    } else if (type === CSSLOT_CODEDIRECTORY) {
+      identity = codeDirectoryIdentity(blob, offset);
+    }
+  }
+  return hasCms ? { format: "macho", identity } : void 0;
+}
+function codeDirectoryIdentity(blob, dir) {
+  if (dir + 52 > blob.length || blob.readUInt32BE(dir) !== CSMAGIC_CODEDIRECTORY) return void 0;
+  const version = blob.readUInt32BE(dir + 8);
+  if (version >= CS_SUPPORTSTEAMID) {
+    const teamOffset = blob.readUInt32BE(dir + 48);
+    if (teamOffset !== 0) {
+      const team = cString(blob, dir + teamOffset);
+      if (team) return `Team ID ${team}`;
+    }
+  }
+  const identifier = cString(blob, dir + blob.readUInt32BE(dir + 20));
+  return identifier ? `identifier ${identifier}` : void 0;
+}
+function cString(data, offset) {
+  if (offset < 0 || offset >= data.length) return "";
+  let end = offset;
+  while (end < data.length && data[end] !== 0) end++;
+  return data.subarray(offset, end).toString("utf8");
+}
+var WIN_CERT_TYPE_PKCS_SIGNED_DATA = 2;
+var CERTIFICATE_TABLE_INDEX = 4;
+function peSignature(data) {
+  if (data.length < 64) return void 0;
+  const peOffset = data.readUInt32LE(60);
+  if (peOffset + 24 > data.length || data.readUInt32LE(peOffset) !== 17744) return void 0;
+  const sizeOfOptionalHeader = data.readUInt16LE(peOffset + 20);
+  const optHeader = peOffset + 24;
+  const isPe32Plus = data.readUInt16LE(optHeader) === 523;
+  const dirEntry = optHeader + (isPe32Plus ? 112 : 96) + CERTIFICATE_TABLE_INDEX * 8;
+  if (dirEntry + 8 > optHeader + sizeOfOptionalHeader || dirEntry + 8 > data.length) {
+    return void 0;
+  }
+  const tableOffset = data.readUInt32LE(dirEntry);
+  const tableSize = data.readUInt32LE(dirEntry + 4);
+  if (tableOffset === 0 || tableSize < 8 || tableOffset + 8 > data.length) return void 0;
+  const certLength = data.readUInt32LE(tableOffset);
+  const certType = data.readUInt16LE(tableOffset + 6);
+  if (certType !== WIN_CERT_TYPE_PKCS_SIGNED_DATA || certLength <= 8) return void 0;
+  const pkcs7 = data.subarray(tableOffset + 8, Math.min(tableOffset + certLength, data.length));
+  return { format: "pe", identity: pkcs7SignerIdentity(pkcs7) };
+}
+function readTlv(buf, pos) {
+  if (pos + 2 > buf.length) return void 0;
+  const tag = buf[pos];
+  const first = buf[pos + 1];
+  let length = first;
+  let body = pos + 2;
+  if (first & 128) {
+    const n = first & 127;
+    if (n === 0 || n > 4 || pos + 2 + n > buf.length) return void 0;
+    length = 0;
+    for (let i = 0; i < n; i++) length = length * 256 + buf[pos + 2 + i];
+    body = pos + 2 + n;
+  }
+  if (body + length > buf.length) return void 0;
+  return { tag, start: pos, body, end: body + length };
+}
+function children(buf, parent) {
+  const result = [];
+  let pos = parent.body;
+  while (pos < parent.end) {
+    const tlv = readTlv(buf, pos);
+    if (!tlv) break;
+    result.push(tlv);
+    pos = tlv.end;
+  }
+  return result;
+}
+var normalizeSerial = (hex) => hex.toUpperCase().replace(/^0+/, "");
+function pkcs7SignerIdentity(pkcs7) {
+  try {
+    const contentInfo = readTlv(pkcs7, 0);
+    const explicit = contentInfo && children(pkcs7, contentInfo)[1];
+    const signedDataSeq = explicit && children(pkcs7, explicit)[0];
+    if (!signedDataSeq) return void 0;
+    const parts = children(pkcs7, signedDataSeq);
+    const certsField = parts.find((p2) => p2.tag === 160);
+    const signerInfos = parts[parts.length - 1];
+    if (!certsField || signerInfos?.tag !== 49) return void 0;
+    const certs = children(pkcs7, certsField).filter((c) => c.tag === 48).map((c) => new import_node_crypto2.X509Certificate(pkcs7.subarray(c.start, c.end)));
+    const signerInfo = children(pkcs7, signerInfos)[0];
+    const issuerAndSerial = signerInfo && children(pkcs7, signerInfo)[1];
+    const serialTlv = issuerAndSerial && children(pkcs7, issuerAndSerial)[1];
+    const serial = serialTlv && normalizeSerial(pkcs7.subarray(serialTlv.body, serialTlv.end).toString("hex"));
+    const leaf = certs.find((c) => normalizeSerial(c.serialNumber) === serial);
+    return leaf ? subjectIdentity(leaf.subject) : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function subjectIdentity(subject) {
+  const field = (key) => subject.split("\n").find((line) => line.startsWith(`${key}=`))?.slice(key.length + 1).replace(/\\,/g, ",");
+  return field("O") ?? field("CN");
+}
+
 // src/ecosystems/shared/binary-scan.ts
 var DANGEROUS_NATIVE_SYMBOLS = [
   // Network
@@ -30770,12 +31014,38 @@ function scanBinary(filename, data) {
     }
     if (suspiciousStrings.length >= 50) break;
   }
-  return { filename, symbolCounts, suspiciousStrings, entropy: shannonEntropy(data) };
+  const signature = extractCodeSignature(data);
+  return {
+    filename,
+    symbolCounts,
+    suspiciousStrings,
+    entropy: shannonEntropy(data),
+    ...signature && { signature }
+  };
+}
+function signatureDelta(file, oldSig, newSig) {
+  if (!oldSig) return void 0;
+  const oldId = oldSig.identity ?? "signed";
+  if (!newSig) {
+    return { file, label: "binary:signature-dropped", detail: `${oldId} \u2192 unsigned` };
+  }
+  if (oldSig.format === newSig.format && oldSig.identity && newSig.identity) {
+    if (oldSig.identity !== newSig.identity) {
+      return {
+        file,
+        label: "binary:signer-changed",
+        detail: `${oldSig.identity} \u2192 ${newSig.identity}`
+      };
+    }
+  }
+  return void 0;
 }
 function binaryFindingsDelta(oldScans, newScans) {
   const findings = [];
   for (const [filename, newScan] of newScans) {
     const oldScan = oldScans.get(filename);
+    const signatureFinding = signatureDelta(filename, oldScan?.signature, newScan.signature);
+    if (signatureFinding) findings.push(signatureFinding);
     if (newScan.entropy >= HIGH_ENTROPY_THRESHOLD) {
       const oldEntropy = oldScan?.entropy;
       if (oldEntropy === void 0 || newScan.entropy > oldEntropy + 0.3) {
@@ -31442,6 +31712,16 @@ function annotateHooks(oldHooks, newHooks) {
   });
 }
 
+// src/ecosystems/shared/provenance-check.ts
+function compareProvenance(oldProv, newProv) {
+  if (!oldProv?.attested || !newProv) return void 0;
+  const dropped = !newProv.attested;
+  const sourceChanged = newProv.attested && !!oldProv.source && !!newProv.source && oldProv.source !== newProv.source;
+  const workflowChanged = newProv.attested && !sourceChanged && !!oldProv.workflow && !!newProv.workflow && oldProv.workflow !== newProv.workflow;
+  if (!dropped && !sourceChanged && !workflowChanged) return void 0;
+  return { old: oldProv, new: newProv, dropped, sourceChanged, workflowChanged };
+}
+
 // src/ecosystems/shared/registry-check.ts
 var PUBLIC_REGISTRY_PREFIXES = [
   "https://registry.npmjs.org",
@@ -31654,6 +31934,17 @@ async function resolveJsrRepoUrl(jsrName, npmMeta) {
   }
   return void 0;
 }
+async function fetchJsrProvenance(jsrName, version) {
+  try {
+    const [scope, pkg] = jsrName.slice(1).split("/");
+    const info = await fetchJson(
+      `https://api.jsr.io/scopes/${scope}/packages/${pkg}/versions/${version}`
+    );
+    return { attested: !!info.rekorLogId };
+  } catch {
+    return void 0;
+  }
+}
 async function extractJsrRegistryInfo(jsrName, npmMeta) {
   const license = typeof npmMeta.license === "string" ? npmMeta.license : npmMeta.license?.type;
   let numReleases;
@@ -31860,11 +32151,14 @@ var DenoAnalyzer = class {
     const newArtifact = getArtifactInfo(newMeta);
     const oldArtifact = getArtifactInfo(oldMeta);
     const repoUrl = extractRepoUrl(newMeta);
-    const [newScan, oldScan, repoCheck] = await Promise.all([
+    const [newScan, oldScan, repoCheck, oldProvenance, newProvenance] = await Promise.all([
       download(newVersion, "new")(newArtifact.url),
       download(oldVersion, "old")(oldArtifact.url),
-      checkRepoRelease({ repoUrl, packageName: name, oldVersion, newVersion })
+      checkRepoRelease({ repoUrl, packageName: name, oldVersion, newVersion }),
+      fetchNpmProvenance(oldMeta),
+      fetchNpmProvenance(newMeta)
     ]);
+    const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
     const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS2);
     const oldFindings = scanPatterns(oldScan.files, DANGEROUS_PATTERNS2);
     const annotated = annotateHooks(detectNpmHooks(oldScan.files), detectNpmHooks(newScan.files));
@@ -31890,6 +32184,7 @@ var DenoAnalyzer = class {
       ...binaryDelta.length > 0 && { binaryFindings: { delta: binaryDelta } },
       ...annotated.length > 0 && { installHooks: annotated },
       ...repoCheck && { repoCheck },
+      ...provenanceCheck && { provenanceCheck },
       ...registryCheck && { registryCheck }
     };
   }
@@ -31961,7 +32256,12 @@ var DenoAnalyzer = class {
     ]);
     const { files: newFiles, meta: newMeta, artifact: newArtifact } = newResult;
     const { files: oldFiles, meta: oldMeta, artifact: oldArtifact } = oldResult;
-    const repoUrl = await resolveJsrRepoUrl(jsrName, newMeta);
+    const [repoUrl, oldProvenance, newProvenance] = await Promise.all([
+      resolveJsrRepoUrl(jsrName, newMeta),
+      fetchJsrProvenance(jsrName, oldVersion),
+      fetchJsrProvenance(jsrName, newVersion)
+    ]);
+    const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
     const repoCheck = await checkRepoRelease({
       repoUrl,
       packageName: jsrName,
@@ -31994,6 +32294,7 @@ var DenoAnalyzer = class {
         platformDivergence: false
       },
       ...repoCheck && { repoCheck },
+      ...provenanceCheck && { provenanceCheck },
       ...registryCheck && { registryCheck }
     };
   }
@@ -32084,7 +32385,7 @@ var JavaScriptAnalyzer = class {
     const newArtifact = getArtifactInfo(newMeta);
     const oldArtifact = getArtifactInfo(oldMeta);
     const repoUrl = extractRepoUrl(newMeta);
-    const [newScan, oldScan, repoCheck] = await Promise.all([
+    const [newScan, oldScan, repoCheck, oldProvenance, newProvenance] = await Promise.all([
       download(new_version, "new")(newArtifact.url),
       download(old_version, "old")(oldArtifact.url),
       checkRepoRelease({
@@ -32092,8 +32393,11 @@ var JavaScriptAnalyzer = class {
         packageName: name,
         oldVersion: old_version,
         newVersion: new_version
-      })
+      }),
+      fetchNpmProvenance(oldMeta),
+      fetchNpmProvenance(newMeta)
     ]);
+    const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
     const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS);
     const oldFindings = scanPatterns(oldScan.files, DANGEROUS_PATTERNS);
     const annotated = annotateHooks(detectNpmHooks(oldScan.files), detectNpmHooks(newScan.files));
@@ -32121,6 +32425,7 @@ var JavaScriptAnalyzer = class {
       ...binaryDelta.length > 0 && { binaryFindings: { delta: binaryDelta } },
       ...annotated.length > 0 && { installHooks: annotated },
       ...repoCheck && { repoCheck },
+      ...provenanceCheck && { provenanceCheck },
       ...registryCheck && { registryCheck }
     };
   }
@@ -32440,9 +32745,9 @@ var DANGEROUS_PATTERNS4 = [
 var PY_EXTENSIONS = /* @__PURE__ */ new Set([".py"]);
 
 // src/utils/crypto.ts
-var import_node_crypto2 = require("crypto");
+var import_node_crypto3 = require("crypto");
 function sha256hex(data) {
-  return (0, import_node_crypto2.createHash)("sha256").update(data).digest("hex");
+  return (0, import_node_crypto3.createHash)("sha256").update(data).digest("hex");
 }
 function verifySha256(data, expected) {
   const actual = sha256hex(data);
@@ -32611,6 +32916,31 @@ function computeMetadataDelta3(oldMeta, newMeta) {
     licenseChanged: (oldMeta.info.license ?? "") !== (newMeta.info.license ?? "")
   };
 }
+async function fetchPyPIProvenance(name, version, artifacts) {
+  if (artifacts.length === 0) return void 0;
+  try {
+    const results = await Promise.all(
+      artifacts.map(async (a) => {
+        const res = await fetch(
+          `https://pypi.org/integrity/${encodeURIComponent(name)}/${version}/${encodeURIComponent(a.filename)}/provenance`,
+          { headers: { Accept: "application/vnd.pypi.integrity.v1+json" } }
+        );
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return (await res.json()).attestation_bundles?.[0]?.publisher ?? {};
+      })
+    );
+    if (results.some((r) => r === null)) return { attested: false };
+    const publisher = results[0];
+    return {
+      attested: true,
+      source: publisher.repository ?? publisher.project,
+      workflow: publisher.workflow ?? publisher.workflow_filepath
+    };
+  } catch {
+    return void 0;
+  }
+}
 
 // src/ecosystems/python/index.ts
 async function scanArtifacts(artifacts, tmpDir, tag) {
@@ -32641,7 +32971,8 @@ function mergeBinaryScans(scans) {
   const merged = /* @__PURE__ */ new Map();
   for (const { binaryScans } of scans) {
     for (const [filename, scan] of binaryScans) {
-      if (!merged.has(filename)) merged.set(filename, scan);
+      const existing = merged.get(filename);
+      if (!existing || !existing.signature && scan.signature) merged.set(filename, scan);
     }
   }
   return merged;
@@ -32797,7 +33128,7 @@ var PythonAnalyzer = class {
         error: `old version ${old_version} has no artifact for the given platform(s) \u2014 diff skipped`
       };
     }
-    const [newScans, oldScans, repoCheck] = await Promise.all([
+    const [newScans, oldScans, repoCheck, oldProvenance, newProvenance] = await Promise.all([
       scanArtifacts(newArtifacts, tmpDir, `${name}_${new_version}_new`),
       scanArtifacts(oldArtifacts, tmpDir, `${name}_${old_version}_old`),
       checkRepoRelease({
@@ -32805,8 +33136,11 @@ var PythonAnalyzer = class {
         packageName: name,
         oldVersion: old_version,
         newVersion: new_version
-      })
+      }),
+      fetchPyPIProvenance(name, old_version, oldArtifacts),
+      fetchPyPIProvenance(name, new_version, newArtifacts)
     ]);
+    const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
     const newDerived = deriveFindings(newScans);
     const oldDerived = deriveFindings(oldScans);
     const binaryDelta = binaryFindingsDelta(oldDerived.binaries, newDerived.binaries);
@@ -32835,6 +33169,7 @@ var PythonAnalyzer = class {
       ...binaryDelta.length > 0 && { binaryFindings: { delta: binaryDelta } },
       ...annotated.length > 0 && { installHooks: annotated },
       ...repoCheck && { repoCheck },
+      ...provenanceCheck && { provenanceCheck },
       ...registryCheck && { registryCheck }
     };
   }
@@ -33111,6 +33446,10 @@ function buildReport(input, lockfiles) {
     (s3, lf) => s3 + lf.packages.filter((p2) => p2.metadataDelta?.licenseChanged).length,
     0
   );
+  const provenanceRegressions = lockfiles.reduce(
+    (s3, lf) => s3 + lf.packages.filter((p2) => p2.provenanceCheck).length,
+    0
+  );
   const ecosystems = [...new Set(lockfiles.map((lf) => lf.ecosystem))];
   return {
     schemaVersion: "1",
@@ -33130,6 +33469,7 @@ function buildReport(input, lockfiles) {
       freshnessWarnings,
       publisherChanges,
       licenseChanges,
+      provenanceRegressions,
       ecosystems
     },
     lockfiles

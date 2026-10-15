@@ -9,18 +9,21 @@ import {
   downloadNpmTarball,
   extractRegistryInfo,
   extractRepoUrl,
+  fetchNpmProvenance,
   fetchNpmVersion,
   getArtifactInfo,
 } from '../javascript/npm.js';
 import { type BinaryScan, binaryFindingsDelta, scanBinary } from '../shared/binary-scan.js';
 import { diffFiles } from '../shared/diff.js';
 import { annotateHooks, detectNpmHooks } from '../shared/install-hooks.js';
+import { compareProvenance } from '../shared/provenance-check.js';
 import { checkRegistry } from '../shared/registry-check.js';
 import { checkRepoRelease } from '../shared/repo-check.js';
 import { findingsDelta, scanPatterns } from '../shared/scan.js';
 import {
   computeJsrMetadataDelta,
   extractJsrRegistryInfo,
+  fetchJsrProvenance,
   fetchJsrVersion,
   resolveJsrRepoUrl,
 } from './jsr.js';
@@ -160,11 +163,14 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
     const oldArtifact = getArtifactInfo(oldMeta);
     const repoUrl = extractRepoUrl(newMeta);
 
-    const [newScan, oldScan, repoCheck] = await Promise.all([
+    const [newScan, oldScan, repoCheck, oldProvenance, newProvenance] = await Promise.all([
       download(newVersion!, 'new')(newArtifact.url),
       download(oldVersion!, 'old')(oldArtifact.url),
       checkRepoRelease({ repoUrl, packageName: name, oldVersion, newVersion }),
+      fetchNpmProvenance(oldMeta),
+      fetchNpmProvenance(newMeta),
     ]);
+    const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
 
     const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS);
     const oldFindings = scanPatterns(oldScan.files, DANGEROUS_PATTERNS);
@@ -192,6 +198,7 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
       ...(binaryDelta.length > 0 && { binaryFindings: { delta: binaryDelta } }),
       ...(annotated.length > 0 && { installHooks: annotated }),
       ...(repoCheck && { repoCheck }),
+      ...(provenanceCheck && { provenanceCheck }),
       ...(registryCheck && { registryCheck }),
     };
   }
@@ -288,7 +295,12 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
     const { files: newFiles, meta: newMeta, artifact: newArtifact } = newResult;
     const { files: oldFiles, meta: oldMeta, artifact: oldArtifact } = oldResult;
 
-    const repoUrl = await resolveJsrRepoUrl(jsrName, newMeta);
+    const [repoUrl, oldProvenance, newProvenance] = await Promise.all([
+      resolveJsrRepoUrl(jsrName, newMeta),
+      fetchJsrProvenance(jsrName, oldVersion!),
+      fetchJsrProvenance(jsrName, newVersion!),
+    ]);
+    const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
     const repoCheck = await checkRepoRelease({
       repoUrl,
       packageName: jsrName,
@@ -323,6 +335,7 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
         platformDivergence: false,
       },
       ...(repoCheck && { repoCheck }),
+      ...(provenanceCheck && { provenanceCheck }),
       ...(registryCheck && { registryCheck }),
     };
   }
