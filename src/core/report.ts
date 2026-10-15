@@ -4,6 +4,8 @@ import type {
   InstallHook,
   KnownVuln,
   PackageAnalysis,
+  Provenance,
+  ProvenanceCheck,
   RegistryCheck,
   RepoCheck,
   SecurityFinding,
@@ -31,6 +33,10 @@ export function formatReport(report: SecurityReport): string {
   const releaseNote =
     summary.releaseDropped > 0
       ? `\n⚠ RELEASE DROPPED: ${summary.releaseDropped} package(s) lost repo release tagging`
+      : '';
+  const provenanceNote =
+    summary.provenanceRegressions > 0
+      ? `\n⚠ PROVENANCE REGRESSION: ${summary.provenanceRegressions} package(s) lost or changed their build attestation`
       : '';
   const hooksNote =
     summary.installHooksAdded > 0
@@ -65,6 +71,7 @@ export function formatReport(report: SecurityReport): string {
       binaryNote +
       vulnNote +
       releaseNote +
+      provenanceNote +
       hooksNote +
       registryNote +
       freshnessNote +
@@ -218,6 +225,11 @@ function formatPackage(pkg: PackageAnalysis, idx: number, total: number): string
     lines.push(formatRepoCheck(pkg.repoCheck));
   }
 
+  if (pkg.provenanceCheck) {
+    lines.push('\nPROVENANCE');
+    lines.push(formatProvenance(pkg.provenanceCheck));
+  }
+
   // Binary scan
   if (pkg.binaryFindings && pkg.binaryFindings.delta.length > 0) {
     lines.push('\nBINARY SCAN');
@@ -326,6 +338,19 @@ function formatRepoCheck(r: RepoCheck): string {
     lines.push(`  new:  ${status}`);
   }
   return lines.join('\n');
+}
+
+function formatProvenance(p: ProvenanceCheck): string {
+  const describe = (v: Provenance) =>
+    v.attested
+      ? `attested${v.source ? ` (${v.source}${v.workflow ? ` · ${v.workflow}` : ''})` : ''}`
+      : 'none';
+  const verdict = p.dropped
+    ? '✗ attestation dropped'
+    : p.sourceChanged
+      ? '✗ source repository changed'
+      : '⚠ build workflow changed';
+  return [`  old:  ${describe(p.old)}`, `  new:  ${describe(p.new)}`, `  ${verdict}`].join('\n');
 }
 
 function formatBinaryFindings(findings: BinaryFinding[]): string {

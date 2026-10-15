@@ -1,4 +1,4 @@
-import type { ArtifactInfo, RegistryMetadata } from '../../types.js';
+import type { ArtifactInfo, Provenance, RegistryMetadata } from '../../types.js';
 import { downloadBuffer, fetchJson } from '../../utils/http.js';
 
 interface NpmAuthor {
@@ -20,6 +20,7 @@ export interface NpmVersion {
     tarball: string;
     shasum: string;
     integrity?: string;
+    attestations?: { url: string; provenance?: { predicateType: string } };
   };
   /** Who published this specific version to the npm registry. */
   _npmUser?: { name: string; email?: string };
@@ -33,6 +34,38 @@ interface NpmPackage {
 export async function fetchNpmVersion(name: string, version: string): Promise<NpmVersion> {
   const encoded = encodeNpmName(name);
   return fetchJson<NpmVersion>(`https://registry.npmjs.org/${encoded}/${version}`);
+}
+
+interface NpmAttestations {
+  attestations?: { predicateType: string; bundle?: { dsseEnvelope?: { payload?: string } } }[];
+}
+
+/**
+ * Read the SLSA build provenance npm records for a version. Returns undefined when the
+ * attestation exists but cannot be read, so an unreadable bundle is never reported as dropped.
+ */
+export async function fetchNpmProvenance(meta: NpmVersion): Promise<Provenance | undefined> {
+  const att = meta.dist.attestations;
+  if (!att?.provenance) return { attested: false };
+  try {
+    const bundle = await fetchJson<NpmAttestations>(att.url);
+    const slsa = bundle.attestations?.find((a) =>
+      a.predicateType.startsWith('https://slsa.dev/provenance/'),
+    );
+    const payload = slsa?.bundle?.dsseEnvelope?.payload;
+    if (!payload) return { attested: true };
+    const statement = JSON.parse(Buffer.from(payload, 'base64').toString('utf8')) as {
+      predicate?: {
+        buildDefinition?: {
+          externalParameters?: { workflow?: { repository?: string; path?: string } };
+        };
+      };
+    };
+    const workflow = statement.predicate?.buildDefinition?.externalParameters?.workflow;
+    return { attested: true, source: workflow?.repository, workflow: workflow?.path };
+  } catch {
+    return { attested: true };
+  }
 }
 
 async function fetchNpmPackage(name: string): Promise<NpmPackage> {

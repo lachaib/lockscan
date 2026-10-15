@@ -1,4 +1,4 @@
-import type { RegistryMetadata } from '../../types.js';
+import type { Provenance, RegistryMetadata } from '../../types.js';
 import { fetchJson } from '../../utils/http.js';
 import type { NpmVersion } from '../javascript/npm.js';
 import { extractRepoUrl } from '../javascript/npm.js';
@@ -59,6 +59,22 @@ export async function resolveJsrRepoUrl(
     // best-effort
   }
   return undefined;
+}
+
+/** JSR records a Sigstore transparency-log entry (`rekorLogId`) for versions published with provenance. */
+export async function fetchJsrProvenance(
+  jsrName: string,
+  version: string,
+): Promise<Provenance | undefined> {
+  try {
+    const [scope, pkg] = jsrName.slice(1).split('/');
+    const info = await fetchJson<{ rekorLogId?: string | null }>(
+      `https://api.jsr.io/scopes/${scope}/packages/${pkg}/versions/${version}`,
+    );
+    return { attested: !!info.rekorLogId };
+  } catch {
+    return undefined;
+  }
 }
 
 export async function extractJsrRegistryInfo(

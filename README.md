@@ -218,6 +218,21 @@ Any of these files being added, removed, or modified between the old and new ver
 
 ---
 
+### 14. Build provenance regressions
+
+**What it detects:** A version whose build attestation disappeared (`high`), whose attested source repository changed (`high`), or whose attested build workflow changed within the same repository (`moderate`), compared with the previous version.
+
+**Why it matters:** Attestations bind a published artifact to the repository and workflow that built it. A maintainer who publishes with provenance and then ships a version without it, or from a different repository, has most likely published from a laptop or a compromised token instead of their release pipeline — the typical shape of an account takeover.
+
+| Ecosystem | Source | Identity compared |
+|---|---|---|
+| npm (and `npm:` in Deno) | `dist.attestations` SLSA provenance (Sigstore) | Source repository + workflow path |
+| PyPI | PEP 740 attestations (Integrity API); every selected artifact must be attested | Trusted Publisher repository + workflow |
+| JSR | Sigstore transparency-log entry (`rekorLogId`) | Presence only |
+| Packagist | No provenance mechanism | Not applicable |
+
+**Limits:** Attestations are read from the registry, not cryptographically verified. A package that never had provenance is not flagged, and gaining provenance is not reported. Registry or network errors count as "unknown", never as "dropped".
+
 ---
 
 ## Artifact verification

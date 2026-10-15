@@ -26626,6 +26626,8 @@ function packageMaxSeverity(pkg) {
   if (pkg.securityFindings?.platformDivergence) s3 = higher(s3, "high");
   if (pkg.metadataDelta?.publisherChanged) s3 = higher(s3, "high");
   if (pkg.metadataDelta?.buildSystemChanged) s3 = higher(s3, "high");
+  if (pkg.provenanceCheck?.dropped || pkg.provenanceCheck?.sourceChanged) s3 = higher(s3, "high");
+  if (pkg.provenanceCheck?.workflowChanged) s3 = higher(s3, "moderate");
   if (pkg.installHooks?.some((h) => h.isNew)) s3 = higher(s3, "high");
   if (pkg.registryCheck?.potentialConfusion) s3 = higher(s3, "critical");
   else if (pkg.registryCheck?.versionShapeSuspicious) s3 = higher(s3, "low");
@@ -26765,6 +26767,9 @@ function buildSignals(pkg) {
   else if (pkg.registryCheck?.versionShapeSuspicious) signals.push("unusual version number");
   if (pkg.registryCheck?.registryChanged) signals.push("registry changed");
   if (pkg.repoCheck?.releaseDropped) signals.push("release tag dropped");
+  if (pkg.provenanceCheck?.dropped) signals.push("build provenance dropped");
+  if (pkg.provenanceCheck?.sourceChanged) signals.push("provenance source changed");
+  if (pkg.provenanceCheck?.workflowChanged) signals.push("provenance workflow changed");
   if ((pkg.registryInfo?.versionAgeDays ?? Infinity) < 1) signals.push("fresh publish (<24h)");
   if (pkg.metadataDelta?.newBinaryWheels) signals.push("new binary wheels");
   if (pkg.metadataDelta?.licenseChanged) signals.push("license changed");
@@ -26837,6 +26842,9 @@ function packageSignals(pkg) {
   else if (pkg.registryCheck?.versionShapeSuspicious) signals.push("unusual version number");
   if (pkg.registryCheck?.registryChanged) signals.push("registry changed");
   if (pkg.repoCheck?.releaseDropped) signals.push("release tag dropped");
+  if (pkg.provenanceCheck?.dropped) signals.push("build provenance dropped");
+  if (pkg.provenanceCheck?.sourceChanged) signals.push("provenance source changed");
+  if (pkg.provenanceCheck?.workflowChanged) signals.push("provenance workflow changed");
   if ((pkg.registryInfo?.versionAgeDays ?? Infinity) < 1) signals.push("\u26A1 fresh publish");
   if (pkg.metadataDelta?.newBinaryWheels) signals.push("new binary wheels");
   if (pkg.metadataDelta?.licenseChanged) signals.push("license changed");
@@ -27212,6 +27220,16 @@ function resultsForPackage(pkg, ecosystem, lockfilePath, workspace) {
       message: {
         text: `${pkg.name} (${versionStr}) has no release tag in ${pkg.repoCheck.repoUrl} \u2014 the previous version did`
       },
+      locations: [loc]
+    });
+  }
+  if (pkg.provenanceCheck) {
+    const pc = pkg.provenanceCheck;
+    const text = pc.dropped ? `${pkg.name} (${versionStr}) has no build provenance attestation \u2014 the previous version did` : pc.sourceChanged ? `${pkg.name} (${versionStr}) was built from ${pc.new.source}, previously ${pc.old.source}` : `${pkg.name} (${versionStr}) was built by workflow ${pc.new.workflow}, previously ${pc.old.workflow}`;
+    results.push({
+      ruleId: "lockscan/provenance-regression",
+      level: pc.workflowChanged ? "warning" : "error",
+      message: { text },
       locations: [loc]
     });
   }
@@ -30558,6 +30576,23 @@ async function fetchNpmVersion(name, version) {
   const encoded = encodeNpmName(name);
   return fetchJson(`https://registry.npmjs.org/${encoded}/${version}`);
 }
+async function fetchNpmProvenance(meta) {
+  const att = meta.dist.attestations;
+  if (!att?.provenance) return { attested: false };
+  try {
+    const bundle = await fetchJson(att.url);
+    const slsa = bundle.attestations?.find(
+      (a) => a.predicateType.startsWith("https://slsa.dev/provenance/")
+    );
+    const payload = slsa?.bundle?.dsseEnvelope?.payload;
+    if (!payload) return { attested: true };
+    const statement = JSON.parse(Buffer.from(payload, "base64").toString("utf8"));
+    const workflow = statement.predicate?.buildDefinition?.externalParameters?.workflow;
+    return { attested: true, source: workflow?.repository, workflow: workflow?.path };
+  } catch {
+    return { attested: true };
+  }
+}
 async function fetchNpmPackage(name) {
   const encoded = encodeNpmName(name);
   const res = await fetch(`https://registry.npmjs.org/${encoded}`, {
@@ -31677,6 +31712,16 @@ function annotateHooks(oldHooks, newHooks) {
   });
 }
 
+// src/ecosystems/shared/provenance-check.ts
+function compareProvenance(oldProv, newProv) {
+  if (!oldProv?.attested || !newProv) return void 0;
+  const dropped = !newProv.attested;
+  const sourceChanged = newProv.attested && !!oldProv.source && !!newProv.source && oldProv.source !== newProv.source;
+  const workflowChanged = newProv.attested && !sourceChanged && !!oldProv.workflow && !!newProv.workflow && oldProv.workflow !== newProv.workflow;
+  if (!dropped && !sourceChanged && !workflowChanged) return void 0;
+  return { old: oldProv, new: newProv, dropped, sourceChanged, workflowChanged };
+}
+
 // src/ecosystems/shared/registry-check.ts
 var PUBLIC_REGISTRY_PREFIXES = [
   "https://registry.npmjs.org",
@@ -31889,6 +31934,17 @@ async function resolveJsrRepoUrl(jsrName, npmMeta) {
   }
   return void 0;
 }
+async function fetchJsrProvenance(jsrName, version) {
+  try {
+    const [scope, pkg] = jsrName.slice(1).split("/");
+    const info = await fetchJson(
+      `https://api.jsr.io/scopes/${scope}/packages/${pkg}/versions/${version}`
+    );
+    return { attested: !!info.rekorLogId };
+  } catch {
+    return void 0;
+  }
+}
 async function extractJsrRegistryInfo(jsrName, npmMeta) {
   const license = typeof npmMeta.license === "string" ? npmMeta.license : npmMeta.license?.type;
   let numReleases;
@@ -32095,11 +32151,14 @@ var DenoAnalyzer = class {
     const newArtifact = getArtifactInfo(newMeta);
     const oldArtifact = getArtifactInfo(oldMeta);
     const repoUrl = extractRepoUrl(newMeta);
-    const [newScan, oldScan, repoCheck] = await Promise.all([
+    const [newScan, oldScan, repoCheck, oldProvenance, newProvenance] = await Promise.all([
       download(newVersion, "new")(newArtifact.url),
       download(oldVersion, "old")(oldArtifact.url),
-      checkRepoRelease({ repoUrl, packageName: name, oldVersion, newVersion })
+      checkRepoRelease({ repoUrl, packageName: name, oldVersion, newVersion }),
+      fetchNpmProvenance(oldMeta),
+      fetchNpmProvenance(newMeta)
     ]);
+    const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
     const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS2);
     const oldFindings = scanPatterns(oldScan.files, DANGEROUS_PATTERNS2);
     const annotated = annotateHooks(detectNpmHooks(oldScan.files), detectNpmHooks(newScan.files));
@@ -32125,6 +32184,7 @@ var DenoAnalyzer = class {
       ...binaryDelta.length > 0 && { binaryFindings: { delta: binaryDelta } },
       ...annotated.length > 0 && { installHooks: annotated },
       ...repoCheck && { repoCheck },
+      ...provenanceCheck && { provenanceCheck },
       ...registryCheck && { registryCheck }
     };
   }
@@ -32196,7 +32256,12 @@ var DenoAnalyzer = class {
     ]);
     const { files: newFiles, meta: newMeta, artifact: newArtifact } = newResult;
     const { files: oldFiles, meta: oldMeta, artifact: oldArtifact } = oldResult;
-    const repoUrl = await resolveJsrRepoUrl(jsrName, newMeta);
+    const [repoUrl, oldProvenance, newProvenance] = await Promise.all([
+      resolveJsrRepoUrl(jsrName, newMeta),
+      fetchJsrProvenance(jsrName, oldVersion),
+      fetchJsrProvenance(jsrName, newVersion)
+    ]);
+    const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
     const repoCheck = await checkRepoRelease({
       repoUrl,
       packageName: jsrName,
@@ -32229,6 +32294,7 @@ var DenoAnalyzer = class {
         platformDivergence: false
       },
       ...repoCheck && { repoCheck },
+      ...provenanceCheck && { provenanceCheck },
       ...registryCheck && { registryCheck }
     };
   }
@@ -32319,7 +32385,7 @@ var JavaScriptAnalyzer = class {
     const newArtifact = getArtifactInfo(newMeta);
     const oldArtifact = getArtifactInfo(oldMeta);
     const repoUrl = extractRepoUrl(newMeta);
-    const [newScan, oldScan, repoCheck] = await Promise.all([
+    const [newScan, oldScan, repoCheck, oldProvenance, newProvenance] = await Promise.all([
       download(new_version, "new")(newArtifact.url),
       download(old_version, "old")(oldArtifact.url),
       checkRepoRelease({
@@ -32327,8 +32393,11 @@ var JavaScriptAnalyzer = class {
         packageName: name,
         oldVersion: old_version,
         newVersion: new_version
-      })
+      }),
+      fetchNpmProvenance(oldMeta),
+      fetchNpmProvenance(newMeta)
     ]);
+    const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
     const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS);
     const oldFindings = scanPatterns(oldScan.files, DANGEROUS_PATTERNS);
     const annotated = annotateHooks(detectNpmHooks(oldScan.files), detectNpmHooks(newScan.files));
@@ -32356,6 +32425,7 @@ var JavaScriptAnalyzer = class {
       ...binaryDelta.length > 0 && { binaryFindings: { delta: binaryDelta } },
       ...annotated.length > 0 && { installHooks: annotated },
       ...repoCheck && { repoCheck },
+      ...provenanceCheck && { provenanceCheck },
       ...registryCheck && { registryCheck }
     };
   }
@@ -32846,6 +32916,31 @@ function computeMetadataDelta3(oldMeta, newMeta) {
     licenseChanged: (oldMeta.info.license ?? "") !== (newMeta.info.license ?? "")
   };
 }
+async function fetchPyPIProvenance(name, version, artifacts) {
+  if (artifacts.length === 0) return void 0;
+  try {
+    const results = await Promise.all(
+      artifacts.map(async (a) => {
+        const res = await fetch(
+          `https://pypi.org/integrity/${encodeURIComponent(name)}/${version}/${encodeURIComponent(a.filename)}/provenance`,
+          { headers: { Accept: "application/vnd.pypi.integrity.v1+json" } }
+        );
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return (await res.json()).attestation_bundles?.[0]?.publisher ?? {};
+      })
+    );
+    if (results.some((r) => r === null)) return { attested: false };
+    const publisher = results[0];
+    return {
+      attested: true,
+      source: publisher.repository ?? publisher.project,
+      workflow: publisher.workflow ?? publisher.workflow_filepath
+    };
+  } catch {
+    return void 0;
+  }
+}
 
 // src/ecosystems/python/index.ts
 async function scanArtifacts(artifacts, tmpDir, tag) {
@@ -33033,7 +33128,7 @@ var PythonAnalyzer = class {
         error: `old version ${old_version} has no artifact for the given platform(s) \u2014 diff skipped`
       };
     }
-    const [newScans, oldScans, repoCheck] = await Promise.all([
+    const [newScans, oldScans, repoCheck, oldProvenance, newProvenance] = await Promise.all([
       scanArtifacts(newArtifacts, tmpDir, `${name}_${new_version}_new`),
       scanArtifacts(oldArtifacts, tmpDir, `${name}_${old_version}_old`),
       checkRepoRelease({
@@ -33041,8 +33136,11 @@ var PythonAnalyzer = class {
         packageName: name,
         oldVersion: old_version,
         newVersion: new_version
-      })
+      }),
+      fetchPyPIProvenance(name, old_version, oldArtifacts),
+      fetchPyPIProvenance(name, new_version, newArtifacts)
     ]);
+    const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
     const newDerived = deriveFindings(newScans);
     const oldDerived = deriveFindings(oldScans);
     const binaryDelta = binaryFindingsDelta(oldDerived.binaries, newDerived.binaries);
@@ -33071,6 +33169,7 @@ var PythonAnalyzer = class {
       ...binaryDelta.length > 0 && { binaryFindings: { delta: binaryDelta } },
       ...annotated.length > 0 && { installHooks: annotated },
       ...repoCheck && { repoCheck },
+      ...provenanceCheck && { provenanceCheck },
       ...registryCheck && { registryCheck }
     };
   }
@@ -33347,6 +33446,10 @@ function buildReport(input, lockfiles) {
     (s3, lf) => s3 + lf.packages.filter((p2) => p2.metadataDelta?.licenseChanged).length,
     0
   );
+  const provenanceRegressions = lockfiles.reduce(
+    (s3, lf) => s3 + lf.packages.filter((p2) => p2.provenanceCheck).length,
+    0
+  );
   const ecosystems = [...new Set(lockfiles.map((lf) => lf.ecosystem))];
   return {
     schemaVersion: "1",
@@ -33366,6 +33469,7 @@ function buildReport(input, lockfiles) {
       freshnessWarnings,
       publisherChanges,
       licenseChanges,
+      provenanceRegressions,
       ecosystems
     },
     lockfiles

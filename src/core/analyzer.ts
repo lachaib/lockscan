@@ -179,6 +179,10 @@ function buildReport(input: DiffReport, lockfiles: LockfileAnalysis[]): Security
     (s, lf) => s + lf.packages.filter((p) => p.metadataDelta?.licenseChanged).length,
     0,
   );
+  const provenanceRegressions = lockfiles.reduce(
+    (s, lf) => s + lf.packages.filter((p) => p.provenanceCheck).length,
+    0,
+  );
   const ecosystems = [...new Set(lockfiles.map((lf) => lf.ecosystem))];
 
   return {
@@ -199,6 +203,7 @@ function buildReport(input: DiffReport, lockfiles: LockfileAnalysis[]): Security
       freshnessWarnings,
       publisherChanges,
       licenseChanges,
+      provenanceRegressions,
       ecosystems,
     },
     lockfiles,

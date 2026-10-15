@@ -346,6 +346,22 @@ function resultsForPackage(
     });
   }
 
+  // Build provenance regression.
+  if (pkg.provenanceCheck) {
+    const pc = pkg.provenanceCheck;
+    const text = pc.dropped
+      ? `${pkg.name} (${versionStr}) has no build provenance attestation — the previous version did`
+      : pc.sourceChanged
+        ? `${pkg.name} (${versionStr}) was built from ${pc.new.source}, previously ${pc.old.source}`
+        : `${pkg.name} (${versionStr}) was built by workflow ${pc.new.workflow}, previously ${pc.old.workflow}`;
+    results.push({
+      ruleId: 'lockscan/provenance-regression',
+      level: pc.workflowChanged ? 'warning' : 'error',
+      message: { text },
+      locations: [loc],
+    });
+  }
+
   // New binary wheels.
   if (pkg.metadataDelta?.newBinaryWheels) {
     results.push({

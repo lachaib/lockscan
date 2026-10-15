@@ -30,6 +30,27 @@ export interface InstallHook {
   changed: boolean;
 }
 
+/** Build provenance of a published version (Sigstore / SLSA attestation, PyPI Trusted Publishing). */
+export interface Provenance {
+  attested: boolean;
+  /** Source repository the attestation binds the build to. */
+  source?: string;
+  /** Build workflow file inside that repository. */
+  workflow?: string;
+}
+
+/** A provenance regression between the old and new version of a package. */
+export interface ProvenanceCheck {
+  old: Provenance;
+  new: Provenance;
+  /** The previous version was attested; the new one is not. */
+  dropped: boolean;
+  /** The attested source repository differs between versions. */
+  sourceChanged: boolean;
+  /** Same repository, but a different build workflow. */
+  workflowChanged: boolean;
+}
+
 /** Registry-level checks for dependency confusion and registry substitution. */
 export interface RegistryCheck {
   oldRegistry?: string;
@@ -143,6 +164,7 @@ export interface PackageAnalysis {
   };
   knownVulns?: KnownVuln[];
   repoCheck?: RepoCheck;
+  provenanceCheck?: ProvenanceCheck;
   installHooks?: InstallHook[];
   registryCheck?: RegistryCheck;
   codebaseUsage?: string[];
@@ -175,6 +197,7 @@ export interface SecurityReport {
     freshnessWarnings: number;
     publisherChanges: number;
     licenseChanges: number;
+    provenanceRegressions: number;
     ecosystems: string[];
   };
   lockfiles: LockfileAnalysis[];

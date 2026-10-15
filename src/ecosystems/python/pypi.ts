@@ -1,5 +1,5 @@
 import type { Platform } from '../../platforms.js';
-import type { ArtifactInfo, RegistryMetadata } from '../../types.js';
+import type { ArtifactInfo, Provenance, RegistryMetadata } from '../../types.js';
 import { verifySha256 } from '../../utils/crypto.js';
 import { downloadBuffer, fetchJson } from '../../utils/http.js';
 
@@ -243,4 +243,51 @@ export function computeMetadataDelta(
     depsRemoved: [...oldDeps].filter((d) => !newDeps.has(d)),
     licenseChanged: (oldMeta.info.license ?? '') !== (newMeta.info.license ?? ''),
   };
+}
+
+interface PyPIPublisher {
+  kind?: string;
+  repository?: string;
+  project?: string;
+  workflow?: string;
+  workflow_filepath?: string;
+}
+
+interface PyPIProvenance {
+  attestation_bundles?: { publisher?: PyPIPublisher }[];
+}
+
+/**
+ * Read the PEP 740 attestations PyPI holds for each artifact. A version counts as attested only
+ * when every artifact is, so stripping the attestation from a single wheel is a regression.
+ * Returns undefined on any network or API error.
+ */
+export async function fetchPyPIProvenance(
+  name: string,
+  version: string,
+  artifacts: ArtifactInfo[],
+): Promise<Provenance | undefined> {
+  if (artifacts.length === 0) return undefined;
+  try {
+    const results = await Promise.all(
+      artifacts.map(async (a) => {
+        const res = await fetch(
+          `https://pypi.org/integrity/${encodeURIComponent(name)}/${version}/${encodeURIComponent(a.filename)}/provenance`,
+          { headers: { Accept: 'application/vnd.pypi.integrity.v1+json' } },
+        );
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return ((await res.json()) as PyPIProvenance).attestation_bundles?.[0]?.publisher ?? {};
+      }),
+    );
+    if (results.some((r) => r === null)) return { attested: false };
+    const publisher = results[0] as PyPIPublisher;
+    return {
+      attested: true,
+      source: publisher.repository ?? publisher.project,
+      workflow: publisher.workflow ?? publisher.workflow_filepath,
+    };
+  } catch {
+    return undefined;
+  }
 }

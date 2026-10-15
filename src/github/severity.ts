@@ -168,6 +168,8 @@ export function packageMaxSeverity(pkg: PackageAnalysis): Severity | null {
   if (pkg.securityFindings?.platformDivergence) s = higher(s, 'high');
   if (pkg.metadataDelta?.publisherChanged) s = higher(s, 'high');
   if (pkg.metadataDelta?.buildSystemChanged) s = higher(s, 'high');
+  if (pkg.provenanceCheck?.dropped || pkg.provenanceCheck?.sourceChanged) s = higher(s, 'high');
+  if (pkg.provenanceCheck?.workflowChanged) s = higher(s, 'moderate');
   if (pkg.installHooks?.some((h) => h.isNew)) s = higher(s, 'high');
 
   if (pkg.registryCheck?.potentialConfusion) s = higher(s, 'critical');
