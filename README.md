@@ -302,7 +302,7 @@ If no `--platform` is specified, `lockscan` detects the current OS and architect
 | `only` | no | all | Restrict analysis to specific change types. Comma-separated: `added`, `updated`, `removed`. |
 | `markdown` | no | `false` | Generate a markdown summary and expose it as the `summary` output. |
 | `markdown-to-file` | no | — | Write the markdown summary to this file path. |
-| `json-to-file` | no | — | Write the full JSON report (identical to the `report` output) to this file path. Always written, even when clean; avoids env-var size limits on large reports. |
+| `json-to-file` | no | — | Write the full JSON report (identical to the `report` output) to this file path. Always written, even when clean (parent directories are created); avoids env-var size limits on large reports. |
 | `sarif-to-file` | no | — | Write a SARIF 2.1.0 report to this file path. Use with `actions/upload-sarif` to surface findings in the Security / Code Scanning tab. |
 | `annotate` | no | `true` | Emit workflow annotations on the dependency manifest file for each finding. Set to `false` to disable. |
 | `post-comment` | no | `false` | Post or update a PR comment with the markdown summary. `true` always posts/updates. `if-findings` posts when findings exist and updates to a "resolved" message when clean. `false` never posts. |
