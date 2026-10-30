@@ -1,10 +1,26 @@
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
-import { dirname, extname, join, relative, resolve, sep } from 'node:path';
+import { dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import AdmZip from 'adm-zip';
 import * as tar from 'tar';
 import { isNativeBinary } from '../ecosystems/shared/binary-formats.js';
 
 export type FileMap = Map<string, string>;
+
+/** A symlink or hardlink entry found in an archive; never created on disk. */
+export interface ArchiveLink {
+  /** Entry path relative to the package root. */
+  name: string;
+  target: string;
+  /** Absolute target, or one that resolves outside the package root. */
+  escapes: boolean;
+}
+
+function classifyLink(name: string, target: string, relativeToEntry: boolean): ArchiveLink {
+  if (target.startsWith('/') || isAbsolute(target)) return { name, target, escapes: true };
+  const base = relativeToEntry ? posix.dirname(name) : '';
+  const resolved = posix.normalize(posix.join(base, target.replace(/\\/g, '/')));
+  return { name, target, escapes: resolved === '..' || resolved.startsWith('../') };
+}
 
 const SKIP_DIRS = new Set([
   '__pycache__',
@@ -31,23 +47,54 @@ export async function extractTarball(
   data: Buffer,
   destDir: string,
   fileExtensions: Set<string>,
+  links: ArchiveLink[] = [],
 ): Promise<FileMap> {
   await mkdir(destDir, { recursive: true });
   const tmpFile = `${destDir}.__archive.tgz`;
   await writeFile(tmpFile, data);
   try {
-    await tar.x({ file: tmpFile, cwd: destDir, strip: 1 });
+    await tar.x({
+      file: tmpFile,
+      cwd: destDir,
+      strip: 1,
+      filter: (path, entry) => {
+        const type = (entry as tar.ReadEntry).type;
+        if (type !== 'SymbolicLink' && type !== 'Link') return true;
+        const name = path.split('/').slice(1).join('/');
+        const raw = String((entry as tar.ReadEntry).linkpath ?? '');
+        // Hardlink targets are archive-root relative and include the top-level directory.
+        const isHard = type === 'Link' && !raw.startsWith('/');
+        const target = isHard ? raw.split('/').slice(1).join('/') || '.' : raw;
+        links.push(classifyLink(name, target, !isHard));
+        return false;
+      },
+    });
   } finally {
     await unlink(tmpFile).catch(() => {});
   }
   return collectFiles(destDir, fileExtensions);
 }
 
+const UNIX_SYMLINK = 0o120000;
+const UNIX_TYPE_MASK = 0o170000;
+
+function isZipSymlink(entry: AdmZip.IZipEntry): boolean {
+  return ((entry.header.attr >>> 16) & UNIX_TYPE_MASK) === UNIX_SYMLINK;
+}
+
+/** Symlink entries of a .whl / .zip archive; they are skipped by the zip extractors. */
+export function zipLinks(data: Buffer): ArchiveLink[] {
+  return new AdmZip(data)
+    .getEntries()
+    .filter(isZipSymlink)
+    .map((e) => classifyLink(e.entryName, e.getData().toString('utf8'), true));
+}
+
 /** Writes every entry of a .whl / .zip archive under destDir, refusing entries that escape it. */
 export async function extractZipToDir(data: Buffer, destDir: string): Promise<void> {
   const root = resolve(destDir);
   for (const entry of new AdmZip(data).getEntries()) {
-    if (entry.isDirectory) continue;
+    if (entry.isDirectory || isZipSymlink(entry)) continue;
     const target = resolve(root, entry.entryName);
     if (!target.startsWith(root + sep)) continue;
     await mkdir(dirname(target), { recursive: true });
@@ -115,7 +162,7 @@ export function extractZip(data: Buffer, fileExtensions: Set<string>): FileMap {
   const files: FileMap = new Map();
   const zip = new AdmZip(data);
   for (const entry of zip.getEntries()) {
-    if (entry.isDirectory) continue;
+    if (entry.isDirectory || isZipSymlink(entry)) continue;
     if (!fileExtensions.has(extname(entry.entryName))) continue;
     try {
       files.set(entry.entryName, entry.getData().toString('utf8'));

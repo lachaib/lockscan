@@ -14,6 +14,7 @@ const CRITICAL_PATTERNS = new Set(['cred:ci-token']);
 
 // Patterns that enable arbitrary code execution.
 const HIGH_PATTERNS = new Set([
+  'archive:symlink-escape',
   'exec:eval',
   'exec:exec',
   'exec:compile',
@@ -28,6 +29,7 @@ const HIGH_PATTERNS = new Set([
 
 // Patterns that enable shell execution or unsafe deserialization.
 const MODERATE_PATTERNS = new Set([
+  'archive:symlink',
   'shell:require-child_process',
   'shell:execSync',
   'shell:spawnSync',

@@ -1,5 +1,5 @@
 import type { SecurityFinding } from '../../types.js';
-import type { FileMap } from '../../utils/extract.js';
+import type { ArchiveLink, FileMap } from '../../utils/extract.js';
 
 export interface Pattern {
   regex: RegExp;
@@ -24,6 +24,16 @@ export function scanPatterns(files: FileMap, patterns: Pattern[]): SecurityFindi
   }
 
   return findings;
+}
+
+/** Turns skipped archive links into findings; a link leaving the package is the dangerous case. */
+export function linkFindings(links: ArchiveLink[]): SecurityFinding[] {
+  return links.map(({ name, target, escapes }) => ({
+    file: name,
+    line: 0,
+    label: escapes ? 'archive:symlink-escape' : 'archive:symlink',
+    detail: target,
+  }));
 }
 
 export function findingsDelta(

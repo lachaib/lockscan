@@ -235,6 +235,16 @@ Any of these files being added, removed, or modified between the old and new ver
 
 ---
 
+### 15. Archive symlinks
+
+**What it detects:** Symlink or hardlink entries inside a package archive (npm/JSR tarballs, sdists, wheels, Composer zips). A link whose target is absolute or resolves outside the package is reported as `archive:symlink-escape` (`high`); any other link as `archive:symlink` (`moderate`). Both carry the link target.
+
+**Why it matters:** A package can ship `index.js` as a symlink to `/proc/self/environ` or a credentials file. Tools that later open the "flagged file" would read data from the machine instead of the package.
+
+**How it works:** Links are never created on disk during extraction, so the extracted tree, including one kept with `artifacts-dir`, contains only regular files.
+
+---
+
 ## Artifact verification
 
 For every downloaded artifact, `lockscan` verifies the cryptographic hash against the value published by the registry:

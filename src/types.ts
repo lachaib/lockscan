@@ -86,6 +86,8 @@ export interface SecurityFinding {
   file: string;
   line: number;
   label: string;
+  /** Extra context, e.g. the target of an archive symlink. */
+  detail?: string;
 }
 
 export interface ArtifactInfo {

@@ -1,12 +1,12 @@
 import { join } from 'node:path';
 import type { PackageChange } from 'lockdelta';
-import type { PackageAnalysis } from '../../types.js';
-import type { FileMap } from '../../utils/extract.js';
+import type { PackageAnalysis, SecurityFinding } from '../../types.js';
+import type { ArchiveLink, FileMap } from '../../utils/extract.js';
 import { extractTarball, extractTarballBinaries } from '../../utils/extract.js';
 import type { AnalysisOptions, EcosystemAnalyzer } from '../base.js';
 import { type BinaryScan, binaryFindingsDelta, scanBinary } from '../shared/binary-scan.js';
 import { diffFiles } from '../shared/diff.js';
-import { findingsDelta, scanPatterns } from '../shared/scan.js';
+import { findingsDelta, linkFindings, scanPatterns } from '../shared/scan.js';
 
 /** Native add-on build scripts; being added or modified means the package now compiles C/C++. */
 const NATIVE_BUILD_FILES = new Set(['binding.gyp', 'binding.gyp.json']);
@@ -39,15 +39,17 @@ import { DANGEROUS_PATTERNS, JS_EXTENSIONS } from './patterns.js';
 interface NpmArtifactScan {
   files: FileMap;
   binaryScans: Map<string, BinaryScan>;
+  linkFindings: SecurityFinding[];
 }
 
 async function scanNpmArtifact(data: Buffer, destDir: string): Promise<NpmArtifactScan> {
-  const files = await extractTarball(data, destDir, JS_EXTENSIONS);
+  const links: ArchiveLink[] = [];
+  const files = await extractTarball(data, destDir, JS_EXTENSIONS, links);
   const binaries = await extractTarballBinaries(destDir);
   const binaryScans = new Map(
     [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)]),
   );
-  return { files, binaryScans };
+  return { files, binaryScans, linkFindings: linkFindings(links) };
 }
 
 export class JavaScriptAnalyzer implements EcosystemAnalyzer {
@@ -92,7 +94,10 @@ export class JavaScriptAnalyzer implements EcosystemAnalyzer {
         checkRepoRelease({ repoUrl, packageName: name, oldVersion: null, newVersion: new_version }),
       ]);
 
-      const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS);
+      const newFindings = [
+        ...scanPatterns(newScan.files, DANGEROUS_PATTERNS),
+        ...newScan.linkFindings,
+      ];
       const newHooks = detectNpmHooks(newScan.files);
       const binaryDelta = binaryFindingsDelta(new Map(), newScan.binaryScans);
 
@@ -143,8 +148,14 @@ export class JavaScriptAnalyzer implements EcosystemAnalyzer {
     ]);
     const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
 
-    const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS);
-    const oldFindings = scanPatterns(oldScan.files, DANGEROUS_PATTERNS);
+    const newFindings = [
+      ...scanPatterns(newScan.files, DANGEROUS_PATTERNS),
+      ...newScan.linkFindings,
+    ];
+    const oldFindings = [
+      ...scanPatterns(oldScan.files, DANGEROUS_PATTERNS),
+      ...oldScan.linkFindings,
+    ];
     const annotated = annotateHooks(detectNpmHooks(oldScan.files), detectNpmHooks(newScan.files));
     const binaryDelta = binaryFindingsDelta(oldScan.binaryScans, newScan.binaryScans);
 

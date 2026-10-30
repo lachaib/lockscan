@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { PackageChange } from 'lockdelta';
-import type { PackageAnalysis } from '../../types.js';
-import type { FileMap } from '../../utils/extract.js';
+import type { PackageAnalysis, SecurityFinding } from '../../types.js';
+import type { ArchiveLink, FileMap } from '../../utils/extract.js';
 import { extractTarball, extractTarballBinaries } from '../../utils/extract.js';
 import type { AnalysisOptions, EcosystemAnalyzer } from '../base.js';
 import {
@@ -19,7 +19,7 @@ import { annotateHooks, detectNpmHooks } from '../shared/install-hooks.js';
 import { compareProvenance } from '../shared/provenance-check.js';
 import { checkRegistry } from '../shared/registry-check.js';
 import { checkRepoRelease } from '../shared/repo-check.js';
-import { findingsDelta, scanPatterns } from '../shared/scan.js';
+import { findingsDelta, linkFindings, scanPatterns } from '../shared/scan.js';
 import {
   computeJsrMetadataDelta,
   extractJsrRegistryInfo,
@@ -32,15 +32,17 @@ import { DANGEROUS_PATTERNS, JSR_EXTENSIONS, NPM_EXTENSIONS } from './patterns.j
 interface NpmArtifactScan {
   files: FileMap;
   binaryScans: Map<string, BinaryScan>;
+  linkFindings: SecurityFinding[];
 }
 
 async function scanNpmArtifact(data: Buffer, destDir: string): Promise<NpmArtifactScan> {
-  const files = await extractTarball(data, destDir, NPM_EXTENSIONS);
+  const links: ArchiveLink[] = [];
+  const files = await extractTarball(data, destDir, NPM_EXTENSIONS, links);
   const binaries = await extractTarballBinaries(destDir);
   const binaryScans = new Map(
     [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)]),
   );
-  return { files, binaryScans };
+  return { files, binaryScans, linkFindings: linkFindings(links) };
 }
 
 export class DenoAnalyzer implements EcosystemAnalyzer {
@@ -127,7 +129,10 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
         checkRepoRelease({ repoUrl, packageName: name, oldVersion: null, newVersion }),
       ]);
 
-      const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS);
+      const newFindings = [
+        ...scanPatterns(newScan.files, DANGEROUS_PATTERNS),
+        ...newScan.linkFindings,
+      ];
       const newHooks = detectNpmHooks(newScan.files);
       const binaryDelta = binaryFindingsDelta(new Map(), newScan.binaryScans);
 
@@ -172,8 +177,14 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
     ]);
     const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
 
-    const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS);
-    const oldFindings = scanPatterns(oldScan.files, DANGEROUS_PATTERNS);
+    const newFindings = [
+      ...scanPatterns(newScan.files, DANGEROUS_PATTERNS),
+      ...newScan.linkFindings,
+    ];
+    const oldFindings = [
+      ...scanPatterns(oldScan.files, DANGEROUS_PATTERNS),
+      ...oldScan.linkFindings,
+    ];
     const annotated = annotateHooks(detectNpmHooks(oldScan.files), detectNpmHooks(newScan.files));
     const binaryDelta = binaryFindingsDelta(oldScan.binaryScans, newScan.binaryScans);
     const metadataDelta = computeMetadataDelta(oldMeta, newMeta);
@@ -229,12 +240,15 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
       const meta = await fetchJsrVersion(jsrName, version);
       const artifact = getArtifactInfo(meta);
       const data = await downloadNpmTarball(artifact.url);
+      const links: ArchiveLink[] = [];
       return {
         files: await extractTarball(
           data,
           join(options.tmpDir, `deno_jsr_${safeName}_${version}_${slot}`),
           JSR_EXTENSIONS,
+          links,
         ),
+        linkFindings: linkFindings(links),
         meta,
         artifact,
       };
@@ -254,6 +268,7 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
         files: newFiles,
         meta: newMeta,
         artifact: newArtifact,
+        linkFindings: newLinkFindings,
       } = await download(newVersion!, 'new')();
       const [repoUrl, registryInfo] = await Promise.all([
         resolveJsrRepoUrl(jsrName, newMeta),
@@ -264,7 +279,7 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
         checkRepoRelease({ repoUrl, packageName: jsrName, oldVersion: null, newVersion }),
       ]);
 
-      const newFindings = scanPatterns(newFiles, DANGEROUS_PATTERNS);
+      const newFindings = [...scanPatterns(newFiles, DANGEROUS_PATTERNS), ...newLinkFindings];
 
       return {
         ...base,
@@ -308,8 +323,8 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
       newVersion,
     });
 
-    const newFindings = scanPatterns(newFiles, DANGEROUS_PATTERNS);
-    const oldFindings = scanPatterns(oldFiles, DANGEROUS_PATTERNS);
+    const newFindings = [...scanPatterns(newFiles, DANGEROUS_PATTERNS), ...newResult.linkFindings];
+    const oldFindings = [...scanPatterns(oldFiles, DANGEROUS_PATTERNS), ...oldResult.linkFindings];
     const jsrDelta = computeJsrMetadataDelta(oldMeta, newMeta);
 
     return {
