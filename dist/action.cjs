@@ -19887,7 +19887,7 @@ var require_utils2 = __commonJS({
     module2.exports = Utils;
     Utils.prototype.makeDir = function(folder) {
       const self = this;
-      function mkdirSync(fpath) {
+      function mkdirSync2(fpath) {
         let resolvedPath = fpath.split(self.sep)[0];
         fpath.split(self.sep).forEach(function(name) {
           if (!name || name.substr(-1, 1) === ":") return;
@@ -19905,7 +19905,7 @@ var require_utils2 = __commonJS({
           if (stat3 && stat3.isFile()) throw Errors.FILE_IN_THE_WAY(`"${resolvedPath}"`);
         });
       }
-      mkdirSync(folder);
+      mkdirSync2(folder);
     };
     Utils.prototype.writeFileTo = function(path, content, overwrite, attr) {
       const self = this;
@@ -22253,6 +22253,7 @@ var require_adm_zip = __commonJS({
 
 // src/action.ts
 var import_node_fs8 = require("fs");
+var import_node_path17 = require("path");
 
 // node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/command.js
 var os = __toESM(require("os"), 1);
@@ -33501,7 +33502,13 @@ async function analyze2(report, options = {}) {
     const workspace = process.env.GITHUB_WORKSPACE ?? process.cwd();
     const prNumber = context2.payload.pull_request?.number;
     const report = await analyze2(diffReport, { platforms, onlyTypes });
-    setOutput("report", JSON.stringify(report));
+    const reportJson = JSON.stringify(report);
+    setOutput("report", reportJson);
+    const jsonFile = getInput("json-to-file");
+    if (jsonFile) {
+      (0, import_node_fs8.mkdirSync)((0, import_node_path17.dirname)(jsonFile), { recursive: true });
+      (0, import_node_fs8.writeFileSync)(jsonFile, reportJson);
+    }
     const maxSev = reportMaxSeverity(report);
     const hasFindings = maxSev !== null;
     setOutput("has-findings", String(hasFindings));

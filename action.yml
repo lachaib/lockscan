@@ -46,6 +46,12 @@ inputs:
       Write the markdown summary to this file path.
     required: false
 
+  json-to-file:
+    description: >
+      Write the full JSON report to this file path. The content is identical
+      to the report output, with no size limit.
+    required: false
+
   sarif-to-file:
     description: >
       Write a SARIF 2.1.0 report to this file path. Use together with
