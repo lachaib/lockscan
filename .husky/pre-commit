@@ -5,4 +5,4 @@ pnpm run check
 
 # Rebuild compiled output and stage it so dist/ stays in sync with src/
 pnpm run build
-git add -f dist/action.cjs dist/action.cjs.map
+git add -f dist/action.cjs dist/action.cjs.map dist/post.cjs dist/post.cjs.map

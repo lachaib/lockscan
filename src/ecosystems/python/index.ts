@@ -5,6 +5,7 @@ import {
   extractTarball,
   extractZip,
   extractZipBinaries,
+  extractZipToDir,
   type FileMap,
 } from '../../utils/extract.js';
 import type { AnalysisOptions, EcosystemAnalyzer } from '../base.js';
@@ -38,6 +39,7 @@ async function scanArtifacts(
   artifacts: PyPIArtifact[],
   tmpDir: string,
   tag: string,
+  keep: boolean,
 ): Promise<WheelScan[]> {
   return Promise.all(
     artifacts.map(async (artifact) => {
@@ -53,6 +55,8 @@ async function scanArtifacts(
         binaryScans = new Map();
       } else {
         files = extractZip(data, PY_EXTENSIONS);
+        if (keep)
+          await extractZipToDir(data, join(tmpDir, `${tag}_${artifact.sha256.slice(0, 8)}`));
         const binaries = extractZipBinaries(data);
         binaryScans = new Map(
           [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)]),
@@ -144,7 +148,7 @@ export class PythonAnalyzer implements EcosystemAnalyzer {
 
   async analyzeChange(change: PackageChange, options: AnalysisOptions): Promise<PackageAnalysis> {
     const { name, change_type, old_version, new_version, is_direct, is_dev } = change;
-    const { platforms, tmpDir } = options;
+    const { platforms, tmpDir, keepArtifacts = false } = options;
     const base = {
       name,
       changeType: change_type,
@@ -182,7 +186,7 @@ export class PythonAnalyzer implements EcosystemAnalyzer {
 
       // artifact scanning and repo check are independent network I/O
       const [newScans, repoCheck] = await Promise.all([
-        scanArtifacts(newArtifacts, tmpDir, `${name}_${new_version}_new`),
+        scanArtifacts(newArtifacts, tmpDir, `${name}_${new_version}_new`, keepArtifacts),
         checkRepoRelease({ repoUrl, packageName: name, oldVersion: null, newVersion: new_version }),
       ]);
 
@@ -226,7 +230,7 @@ export class PythonAnalyzer implements EcosystemAnalyzer {
 
     if (oldArtifacts.length === 0) {
       const [newScans, repoCheck] = await Promise.all([
-        scanArtifacts(newArtifacts, tmpDir, `${name}_${new_version}_new`),
+        scanArtifacts(newArtifacts, tmpDir, `${name}_${new_version}_new`, keepArtifacts),
         checkRepoRelease({
           repoUrl,
           packageName: name,
@@ -254,8 +258,8 @@ export class PythonAnalyzer implements EcosystemAnalyzer {
 
     // both versions have artifacts — scan old, scan new, and check repo all at once
     const [newScans, oldScans, repoCheck, oldProvenance, newProvenance] = await Promise.all([
-      scanArtifacts(newArtifacts, tmpDir, `${name}_${new_version}_new`),
-      scanArtifacts(oldArtifacts, tmpDir, `${name}_${old_version}_old`),
+      scanArtifacts(newArtifacts, tmpDir, `${name}_${new_version}_new`, keepArtifacts),
+      scanArtifacts(oldArtifacts, tmpDir, `${name}_${old_version}_old`, keepArtifacts),
       checkRepoRelease({
         repoUrl,
         packageName: name,

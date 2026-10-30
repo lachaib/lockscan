@@ -5,6 +5,8 @@ import type { PackageAnalysis } from '../types.js';
 export interface AnalysisOptions {
   platforms: Platform[];
   tmpDir: string;
+  /** Also write archives that are normally scanned in memory (wheels) under tmpDir. */
+  keepArtifacts?: boolean;
 }
 
 export interface EcosystemAnalyzer {

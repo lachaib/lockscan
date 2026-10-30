@@ -2080,9 +2080,9 @@ var require_dispatcher_base = __commonJS({
       }
       close(callback) {
         if (callback === void 0) {
-          return new Promise((resolve, reject) => {
+          return new Promise((resolve3, reject) => {
             this.close((err, data) => {
-              return err ? reject(err) : resolve(data);
+              return err ? reject(err) : resolve3(data);
             });
           });
         }
@@ -2120,12 +2120,12 @@ var require_dispatcher_base = __commonJS({
           err = null;
         }
         if (callback === void 0) {
-          return new Promise((resolve, reject) => {
+          return new Promise((resolve3, reject) => {
             this.destroy(err, (err2, data) => {
               return err2 ? (
                 /* istanbul ignore next: should never error */
                 reject(err2)
-              ) : resolve(data);
+              ) : resolve3(data);
             });
           });
         }
@@ -4392,8 +4392,8 @@ var require_util2 = __commonJS({
     function createDeferredPromise() {
       let res;
       let rej;
-      const promise = new Promise((resolve, reject) => {
-        res = resolve;
+      const promise = new Promise((resolve3, reject) => {
+        res = resolve3;
         rej = reject;
       });
       return { promise, resolve: res, reject: rej };
@@ -6572,12 +6572,12 @@ upgrade: ${upgrade}\r
           cb();
         }
       }
-      const waitForDrain = () => new Promise((resolve, reject) => {
+      const waitForDrain = () => new Promise((resolve3, reject) => {
         assert(callback === null);
         if (socket[kError]) {
           reject(socket[kError]);
         } else {
-          callback = resolve;
+          callback = resolve3;
         }
       });
       socket.on("close", onDrain).on("drain", onDrain);
@@ -7214,12 +7214,12 @@ var require_client_h2 = __commonJS({
           cb();
         }
       }
-      const waitForDrain = () => new Promise((resolve, reject) => {
+      const waitForDrain = () => new Promise((resolve3, reject) => {
         assert(callback === null);
         if (socket[kError]) {
           reject(socket[kError]);
         } else {
-          callback = resolve;
+          callback = resolve3;
         }
       });
       h2stream.on("close", onDrain).on("drain", onDrain);
@@ -7697,16 +7697,16 @@ var require_client = __commonJS({
         return this[kNeedDrain] < 2;
       }
       async [kClose]() {
-        return new Promise((resolve) => {
+        return new Promise((resolve3) => {
           if (this[kSize]) {
-            this[kClosedResolve] = resolve;
+            this[kClosedResolve] = resolve3;
           } else {
-            resolve(null);
+            resolve3(null);
           }
         });
       }
       async [kDestroy](err) {
-        return new Promise((resolve) => {
+        return new Promise((resolve3) => {
           const requests = this[kQueue].splice(this[kPendingIdx]);
           for (let i = 0; i < requests.length; i++) {
             const request2 = requests[i];
@@ -7717,7 +7717,7 @@ var require_client = __commonJS({
               this[kClosedResolve]();
               this[kClosedResolve] = null;
             }
-            resolve(null);
+            resolve3(null);
           };
           if (this[kHTTPContext]) {
             this[kHTTPContext].destroy(err, callback);
@@ -7768,7 +7768,7 @@ var require_client = __commonJS({
         });
       }
       try {
-        const socket = await new Promise((resolve, reject) => {
+        const socket = await new Promise((resolve3, reject) => {
           client[kConnector]({
             host,
             hostname,
@@ -7780,7 +7780,7 @@ var require_client = __commonJS({
             if (err) {
               reject(err);
             } else {
-              resolve(socket2);
+              resolve3(socket2);
             }
           });
         });
@@ -8117,8 +8117,8 @@ var require_pool_base = __commonJS({
         if (this[kQueue].isEmpty()) {
           await Promise.all(this[kClients].map((c) => c.close()));
         } else {
-          await new Promise((resolve) => {
-            this[kClosedResolve] = resolve;
+          await new Promise((resolve3) => {
+            this[kClosedResolve] = resolve3;
           });
         }
       }
@@ -9333,7 +9333,7 @@ var require_readable = __commonJS({
         if (this._readableState.closeEmitted) {
           return null;
         }
-        return await new Promise((resolve, reject) => {
+        return await new Promise((resolve3, reject) => {
           if (this[kContentLength] > limit) {
             this.destroy(new AbortError());
           }
@@ -9346,7 +9346,7 @@ var require_readable = __commonJS({
             if (signal?.aborted) {
               reject(signal.reason ?? new AbortError());
             } else {
-              resolve(null);
+              resolve3(null);
             }
           }).on("error", noop3).on("data", function(chunk) {
             limit -= chunk.length;
@@ -9365,7 +9365,7 @@ var require_readable = __commonJS({
     }
     async function consume(stream, type) {
       assert(!stream[kConsume]);
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve3, reject) => {
         if (isUnusable(stream)) {
           const rState = stream._readableState;
           if (rState.destroyed && rState.closeEmitted === false) {
@@ -9382,7 +9382,7 @@ var require_readable = __commonJS({
             stream[kConsume] = {
               type,
               stream,
-              resolve,
+              resolve: resolve3,
               reject,
               length: 0,
               body: []
@@ -9452,18 +9452,18 @@ var require_readable = __commonJS({
       return buffer;
     }
     function consumeEnd(consume2) {
-      const { type, body, resolve, stream, length } = consume2;
+      const { type, body, resolve: resolve3, stream, length } = consume2;
       try {
         if (type === "text") {
-          resolve(chunksDecode(body, length));
+          resolve3(chunksDecode(body, length));
         } else if (type === "json") {
-          resolve(JSON.parse(chunksDecode(body, length)));
+          resolve3(JSON.parse(chunksDecode(body, length)));
         } else if (type === "arrayBuffer") {
-          resolve(chunksConcat(body, length).buffer);
+          resolve3(chunksConcat(body, length).buffer);
         } else if (type === "blob") {
-          resolve(new Blob(body, { type: stream[kContentType] }));
+          resolve3(new Blob(body, { type: stream[kContentType] }));
         } else if (type === "bytes") {
-          resolve(chunksConcat(body, length));
+          resolve3(chunksConcat(body, length));
         }
         consumeFinish(consume2);
       } catch (err) {
@@ -9721,9 +9721,9 @@ var require_api_request = __commonJS({
     };
     function request2(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve3, reject) => {
           request2.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve(data);
+            return err ? reject(err) : resolve3(data);
           });
         });
       }
@@ -9947,9 +9947,9 @@ var require_api_stream = __commonJS({
     };
     function stream(opts, factory, callback) {
       if (callback === void 0) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve3, reject) => {
           stream.call(this, opts, factory, (err, data) => {
-            return err ? reject(err) : resolve(data);
+            return err ? reject(err) : resolve3(data);
           });
         });
       }
@@ -10234,9 +10234,9 @@ var require_api_upgrade = __commonJS({
     };
     function upgrade(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve3, reject) => {
           upgrade.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve(data);
+            return err ? reject(err) : resolve3(data);
           });
         });
       }
@@ -10328,9 +10328,9 @@ var require_api_connect = __commonJS({
     };
     function connect(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve, reject) => {
+        return new Promise((resolve3, reject) => {
           connect.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve(data);
+            return err ? reject(err) : resolve3(data);
           });
         });
       }
@@ -14192,7 +14192,7 @@ var require_fetch = __commonJS({
       function dispatch({ body }) {
         const url = requestCurrentURL(request2);
         const agent = fetchParams.controller.dispatcher;
-        return new Promise((resolve, reject) => agent.dispatch(
+        return new Promise((resolve3, reject) => agent.dispatch(
           {
             path: url.pathname + url.search,
             origin: url.origin,
@@ -14268,7 +14268,7 @@ var require_fetch = __commonJS({
                 }
               }
               const onError = this.onError.bind(this);
-              resolve({
+              resolve3({
                 status,
                 statusText,
                 headersList,
@@ -14314,7 +14314,7 @@ var require_fetch = __commonJS({
               for (let i = 0; i < rawHeaders.length; i += 2) {
                 headersList.append(bufferToLowerCasedHeaderName(rawHeaders[i]), rawHeaders[i + 1].toString("latin1"), true);
               }
-              resolve({
+              resolve3({
                 status,
                 statusText: STATUS_CODES[status],
                 headersList,
@@ -17990,8 +17990,8 @@ var require_util8 = __commonJS({
       return true;
     }
     function delay(ms2) {
-      return new Promise((resolve) => {
-        setTimeout(resolve, ms2).unref();
+      return new Promise((resolve3) => {
+        setTimeout(resolve3, ms2).unref();
       });
     }
     module2.exports = {
@@ -18795,11 +18795,11 @@ var require_lib = __commonJS({
     })();
     var __awaiter3 = exports2 && exports2.__awaiter || function(thisArg, _arguments, P2, generator) {
       function adopt(value) {
-        return value instanceof P2 ? value : new P2(function(resolve) {
-          resolve(value);
+        return value instanceof P2 ? value : new P2(function(resolve3) {
+          resolve3(value);
         });
       }
-      return new (P2 || (P2 = Promise))(function(resolve, reject) {
+      return new (P2 || (P2 = Promise))(function(resolve3, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -18815,7 +18815,7 @@ var require_lib = __commonJS({
           }
         }
         function step(result) {
-          result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -18902,26 +18902,26 @@ var require_lib = __commonJS({
       }
       readBody() {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve3) => __awaiter3(this, void 0, void 0, function* () {
             let output = Buffer.alloc(0);
             this.message.on("data", (chunk) => {
               output = Buffer.concat([output, chunk]);
             });
             this.message.on("end", () => {
-              resolve(output.toString());
+              resolve3(output.toString());
             });
           }));
         });
       }
       readBodyBuffer() {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve3) => __awaiter3(this, void 0, void 0, function* () {
             const chunks = [];
             this.message.on("data", (chunk) => {
               chunks.push(chunk);
             });
             this.message.on("end", () => {
-              resolve(Buffer.concat(chunks));
+              resolve3(Buffer.concat(chunks));
             });
           }));
         });
@@ -19129,14 +19129,14 @@ var require_lib = __commonJS({
        */
       requestRaw(info, data) {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve, reject) => {
+          return new Promise((resolve3, reject) => {
             function callbackForResult(err, res) {
               if (err) {
                 reject(err);
               } else if (!res) {
                 reject(new Error("Unknown error"));
               } else {
-                resolve(res);
+                resolve3(res);
               }
             }
             this.requestRawWithCallback(info, data, callbackForResult);
@@ -19380,12 +19380,12 @@ var require_lib = __commonJS({
         return __awaiter3(this, void 0, void 0, function* () {
           retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
           const ms2 = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
-          return new Promise((resolve) => setTimeout(() => resolve(), ms2));
+          return new Promise((resolve3) => setTimeout(() => resolve3(), ms2));
         });
       }
       _processResponse(res, options) {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve, reject) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve3, reject) => __awaiter3(this, void 0, void 0, function* () {
             const statusCode = res.message.statusCode || 0;
             const response = {
               statusCode,
@@ -19393,7 +19393,7 @@ var require_lib = __commonJS({
               headers: {}
             };
             if (statusCode === HttpCodes2.NotFound) {
-              resolve(response);
+              resolve3(response);
             }
             function dateTimeDeserializer(key, value) {
               if (typeof value === "string") {
@@ -19432,7 +19432,7 @@ var require_lib = __commonJS({
               err.result = response.result;
               reject(err);
             } else {
-              resolve(response);
+              resolve3(response);
             }
           }));
         });
@@ -21524,8 +21524,8 @@ var require_adm_zip = __commonJS({
         return null;
       }
       function fixPath(zipPath) {
-        const { join: join8, normalize, sep: sep2 } = pth.posix;
-        return join8(pth.isAbsolute(zipPath) ? "/" : ".", normalize(sep2 + zipPath.split("\\").join(sep2) + sep2));
+        const { join: join9, normalize, sep: sep3 } = pth.posix;
+        return join9(pth.isAbsolute(zipPath) ? "/" : ".", normalize(sep3 + zipPath.split("\\").join(sep3) + sep3));
       }
       function filenameFilter(filterfn) {
         if (filterfn instanceof RegExp) {
@@ -21920,10 +21920,10 @@ var require_adm_zip = __commonJS({
          * @param {function|string} [props.namefix] - optional function to help fix filename
          */
         addLocalFolderPromise: function(localPath2, props) {
-          return new Promise((resolve, reject) => {
+          return new Promise((resolve3, reject) => {
             this.addLocalFolderAsync2(Object.assign({ localPath: localPath2 }, props), (err, done) => {
               if (err) reject(err);
-              if (done) resolve(this);
+              if (done) resolve3(this);
             });
           });
         },
@@ -22110,12 +22110,12 @@ var require_adm_zip = __commonJS({
           keepOriginalPermission = get_Bool(false, keepOriginalPermission);
           overwrite = get_Bool(false, overwrite);
           if (!callback) {
-            return new Promise((resolve, reject) => {
+            return new Promise((resolve3, reject) => {
               this.extractAllToAsync(targetPath, overwrite, keepOriginalPermission, function(err) {
                 if (err) {
                   reject(err);
                 } else {
-                  resolve(this);
+                  resolve3(this);
                 }
               });
             });
@@ -22213,11 +22213,11 @@ var require_adm_zip = __commonJS({
                  */
         writeZipPromise: function(targetFileName, props) {
           const { overwrite, perm } = Object.assign({ overwrite: true }, props);
-          return new Promise((resolve, reject) => {
+          return new Promise((resolve3, reject) => {
             if (!targetFileName && opts.filename) targetFileName = opts.filename;
             if (!targetFileName) reject("ADM-ZIP: ZIP File Name Missing");
             this.toBufferPromise().then((zipData) => {
-              const ret = (done) => done ? resolve(done) : reject("ADM-ZIP: Wasn't able to write zip file");
+              const ret = (done) => done ? resolve3(done) : reject("ADM-ZIP: Wasn't able to write zip file");
               filetools.writeFileToAsync(targetFileName, zipData, overwrite, perm, ret);
             }, reject);
           });
@@ -22226,8 +22226,8 @@ var require_adm_zip = __commonJS({
          * @returns {Promise<Buffer>} A promise to the Buffer.
          */
         toBufferPromise: function() {
-          return new Promise((resolve, reject) => {
-            _zip.toAsyncBuffer(resolve, reject);
+          return new Promise((resolve3, reject) => {
+            _zip.toAsyncBuffer(resolve3, reject);
           });
         },
         /**
@@ -22253,7 +22253,7 @@ var require_adm_zip = __commonJS({
 
 // src/action.ts
 var import_node_fs8 = require("fs");
-var import_node_path17 = require("path");
+var import_node_path18 = require("path");
 
 // node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/command.js
 var os = __toESM(require("os"), 1);
@@ -22417,11 +22417,11 @@ var import_os = require("os");
 var import_fs = require("fs");
 var __awaiter = function(thisArg, _arguments, P2, generator) {
   function adopt(value) {
-    return value instanceof P2 ? value : new P2(function(resolve) {
-      resolve(value);
+    return value instanceof P2 ? value : new P2(function(resolve3) {
+      resolve3(value);
     });
   }
-  return new (P2 || (P2 = Promise))(function(resolve, reject) {
+  return new (P2 || (P2 = Promise))(function(resolve3, reject) {
     function fulfilled(value) {
       try {
         step(generator.next(value));
@@ -22437,7 +22437,7 @@ var __awaiter = function(thisArg, _arguments, P2, generator) {
       }
     }
     function step(result) {
-      result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected);
+      result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
     }
     step((generator = generator.apply(thisArg, _arguments || [])).next());
   });
@@ -22750,6 +22750,13 @@ function warning(message, properties = {}) {
 function notice(message, properties = {}) {
   issueCommand("notice", toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
+function saveState(name, value) {
+  const filePath = process.env["GITHUB_STATE"] || "";
+  if (filePath) {
+    return issueFileCommand("STATE", prepareKeyValueMessage(name, value));
+  }
+  issueCommand("save-state", { name }, toCommandValue(value));
+}
 
 // node_modules/.pnpm/@actions+github@9.1.1/node_modules/@actions/github/lib/context.js
 var import_fs2 = require("fs");
@@ -22807,11 +22814,11 @@ var httpClient = __toESM(require_lib(), 1);
 var import_undici2 = __toESM(require_undici(), 1);
 var __awaiter2 = function(thisArg, _arguments, P2, generator) {
   function adopt(value) {
-    return value instanceof P2 ? value : new P2(function(resolve) {
-      resolve(value);
+    return value instanceof P2 ? value : new P2(function(resolve3) {
+      resolve3(value);
     });
   }
-  return new (P2 || (P2 = Promise))(function(resolve, reject) {
+  return new (P2 || (P2 = Promise))(function(resolve3, reject) {
     function fulfilled(value) {
       try {
         step(generator.next(value));
@@ -22827,7 +22834,7 @@ var __awaiter2 = function(thisArg, _arguments, P2, generator) {
       }
     }
     function step(result) {
-      result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected);
+      result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
     }
     step((generator = generator.apply(thisArg, _arguments || [])).next());
   });
@@ -30481,6 +30488,16 @@ async function extractTarball(data, destDir, fileExtensions) {
   }
   return collectFiles(destDir, fileExtensions);
 }
+async function extractZipToDir(data, destDir) {
+  const root = (0, import_node_path11.resolve)(destDir);
+  for (const entry of new import_adm_zip.default(data).getEntries()) {
+    if (entry.isDirectory) continue;
+    const target = (0, import_node_path11.resolve)(root, entry.entryName);
+    if (!target.startsWith(root + import_node_path11.sep)) continue;
+    await (0, import_promises2.mkdir)((0, import_node_path11.dirname)(target), { recursive: true });
+    await (0, import_promises2.writeFile)(target, entry.getData());
+  }
+}
 var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([".so", ".pyd", ".dylib", ".dll", ".node", ".exe"]);
 var MIN_EXECUTABLE_SIZE = 1024;
 var WHEEL_DATA_DIR = /^[^/]+\.data\//;
@@ -32944,7 +32961,7 @@ async function fetchPyPIProvenance(name, version, artifacts) {
 }
 
 // src/ecosystems/python/index.ts
-async function scanArtifacts(artifacts, tmpDir, tag) {
+async function scanArtifacts(artifacts, tmpDir, tag, keep) {
   return Promise.all(
     artifacts.map(async (artifact) => {
       const data = await downloadAndVerify(artifact);
@@ -32959,6 +32976,8 @@ async function scanArtifacts(artifacts, tmpDir, tag) {
         binaryScans = /* @__PURE__ */ new Map();
       } else {
         files = extractZip(data, PY_EXTENSIONS);
+        if (keep)
+          await extractZipToDir(data, (0, import_node_path14.join)(tmpDir, `${tag}_${artifact.sha256.slice(0, 8)}`));
         const binaries = extractZipBinaries(data);
         binaryScans = new Map(
           [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)])
@@ -33039,7 +33058,7 @@ var PythonAnalyzer = class {
   ecosystem = "python";
   async analyzeChange(change, options) {
     const { name, change_type, old_version, new_version, is_direct, is_dev } = change;
-    const { platforms, tmpDir } = options;
+    const { platforms, tmpDir, keepArtifacts = false } = options;
     const base = {
       name,
       changeType: change_type,
@@ -33070,7 +33089,7 @@ var PythonAnalyzer = class {
       }
       const repoUrl2 = extractRepoUrl3(newMeta2);
       const [newScans2, repoCheck2] = await Promise.all([
-        scanArtifacts(newArtifacts2, tmpDir, `${name}_${new_version}_new`),
+        scanArtifacts(newArtifacts2, tmpDir, `${name}_${new_version}_new`, keepArtifacts),
         checkRepoRelease({ repoUrl: repoUrl2, packageName: name, oldVersion: null, newVersion: new_version })
       ]);
       const { findings, platformDivergence, binaries, hooks } = deriveFindings(newScans2);
@@ -33106,7 +33125,7 @@ var PythonAnalyzer = class {
     }
     if (oldArtifacts.length === 0) {
       const [newScans2, repoCheck2] = await Promise.all([
-        scanArtifacts(newArtifacts, tmpDir, `${name}_${new_version}_new`),
+        scanArtifacts(newArtifacts, tmpDir, `${name}_${new_version}_new`, keepArtifacts),
         checkRepoRelease({
           repoUrl,
           packageName: name,
@@ -33130,8 +33149,8 @@ var PythonAnalyzer = class {
       };
     }
     const [newScans, oldScans, repoCheck, oldProvenance, newProvenance] = await Promise.all([
-      scanArtifacts(newArtifacts, tmpDir, `${name}_${new_version}_new`),
-      scanArtifacts(oldArtifacts, tmpDir, `${name}_${old_version}_old`),
+      scanArtifacts(newArtifacts, tmpDir, `${name}_${new_version}_new`, keepArtifacts),
+      scanArtifacts(oldArtifacts, tmpDir, `${name}_${old_version}_old`, keepArtifacts),
       checkRepoRelease({
         repoUrl,
         packageName: name,
@@ -33315,7 +33334,8 @@ async function analyze(report, options) {
   const platforms = await resolvePlatforms(options.platforms, progress);
   progress(`Platforms: ${platforms.map(platformLabel).join(", ")}
 `);
-  const tmpDir = await (0, import_promises4.mkdtemp)((0, import_node_path16.join)((0, import_node_os.tmpdir)(), "lockscan-"));
+  const keepArtifacts = Boolean(options.artifactsDir);
+  const tmpDir = options.artifactsDir ?? await (0, import_promises4.mkdtemp)((0, import_node_path16.join)((0, import_node_os.tmpdir)(), "lockscan-"));
   try {
     const lockfileAnalyses = [];
     for (const lf of report.lockfiles) {
@@ -33354,7 +33374,8 @@ Analyzing ${lf.path ?? "lockfile"} (${lf.ecosystem}): ${changes.length} change(s
         try {
           const rawAnalysis = await analyzer.analyzeChange(change, {
             platforms,
-            tmpDir: (0, import_node_path16.join)(tmpDir, lf.ecosystem)
+            tmpDir: (0, import_node_path16.join)(tmpDir, lf.ecosystem),
+            keepArtifacts
           });
           const analysis = rawAnalysis.registryCheck ? {
             ...rawAnalysis,
@@ -33388,7 +33409,7 @@ Analyzing ${lf.path ?? "lockfile"} (${lf.ecosystem}): ${changes.length} change(s
     }
     return buildReport(report, lockfileAnalyses);
   } finally {
-    await (0, import_promises4.rm)(tmpDir, { recursive: true, force: true });
+    if (!keepArtifacts) await (0, import_promises4.rm)(tmpDir, { recursive: true, force: true });
   }
 }
 async function resolvePlatforms(explicit, progress) {
@@ -33482,6 +33503,15 @@ async function analyze2(report, options = {}) {
   return analyze(report, options);
 }
 
+// src/utils/artifacts-dir.ts
+var import_promises5 = require("fs/promises");
+var import_node_path17 = require("path");
+async function prepareArtifactsDir(dir, base) {
+  const parent = (0, import_node_path17.resolve)(base, dir);
+  await (0, import_promises5.mkdir)(parent, { recursive: true });
+  return (0, import_promises5.mkdtemp)((0, import_node_path17.join)(parent, "lockscan-"));
+}
+
 // src/action.ts
 (async () => {
   try {
@@ -33501,12 +33531,18 @@ async function analyze2(report, options = {}) {
     const repo = `${context2.repo.owner}/${context2.repo.repo}`;
     const workspace = process.env.GITHUB_WORKSPACE ?? process.cwd();
     const prNumber = context2.payload.pull_request?.number;
-    const report = await analyze2(diffReport, { platforms, onlyTypes });
+    const artifactsInput = getInput("artifacts-dir");
+    const artifactsDir = artifactsInput ? await prepareArtifactsDir(artifactsInput, workspace) : void 0;
+    if (artifactsDir) {
+      saveState("artifacts-dir", artifactsDir);
+      setOutput("artifacts-path", artifactsDir);
+    }
+    const report = await analyze2(diffReport, { platforms, onlyTypes, artifactsDir });
     const reportJson = JSON.stringify(report);
     setOutput("report", reportJson);
     const jsonFile = getInput("json-to-file");
     if (jsonFile) {
-      (0, import_node_fs8.mkdirSync)((0, import_node_path17.dirname)(jsonFile), { recursive: true });
+      (0, import_node_fs8.mkdirSync)((0, import_node_path18.dirname)(jsonFile), { recursive: true });
       (0, import_node_fs8.writeFileSync)(jsonFile, reportJson);
     }
     const maxSev = reportMaxSeverity(report);

@@ -27,6 +27,8 @@ export interface AnalyzeOptions {
   onlyTypes?: string[];
   /** Suppress progress logs on stderr. Warnings and errors are still written. */
   quiet?: boolean;
+  /** Extract artifacts under this existing directory and leave them in place instead of using a temp dir. */
+  artifactsDir?: string;
 }
 
 export async function analyze(

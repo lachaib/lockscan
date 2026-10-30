@@ -304,6 +304,7 @@ If no `--platform` is specified, `lockscan` detects the current OS and architect
 | `markdown-to-file` | no | — | Write the markdown summary to this file path. |
 | `json-to-file` | no | — | Write the full JSON report (identical to the `report` output) to this file path. Always written, even when clean (parent directories are created); avoids env-var size limits on large reports. |
 | `sarif-to-file` | no | — | Write a SARIF 2.1.0 report to this file path. Use with `actions/upload-sarif` to surface findings in the Security / Code Scanning tab. |
+| `artifacts-dir` | no | — | Extract downloaded artifacts into a new `lockscan-*` subdirectory of this directory and keep them for the rest of the job; read its path from the `artifacts-path` output. Layout: `<artifacts-path>/<ecosystem>/<package>_<version>_<old\|new>[...]`, and the report's `file` paths are relative to each artifact folder. Only that subdirectory is removed, by the action's post step, even on failure or cancellation. The contents are untrusted package code: never execute them. |
 | `annotate` | no | `true` | Emit workflow annotations on the dependency manifest file for each finding. Set to `false` to disable. |
 | `post-comment` | no | `false` | Post or update a PR comment with the markdown summary. `true` always posts/updates. `if-findings` posts when findings exist and updates to a "resolved" message when clean. `false` never posts. |
 | `fail-on` | no | `never` | Fail the step when findings at or above this severity are detected: `critical`, `high`, `any`, or `never`. |
@@ -316,6 +317,7 @@ If no `--platform` is specified, `lockscan` detects the current OS and architect
 | `report` | Full security report as a JSON string. |
 | `summary` | Markdown summary of findings. Set when `markdown: true` or `post-comment` is enabled. |
 | `sarif` | SARIF 2.1.0 report as a JSON string. Only set when `sarif-to-file` is specified. |
+| `artifacts-path` | Directory holding the extracted artifacts. Only set when `artifacts-dir` is specified. |
 | `has-findings` | `true` if any security findings were identified, `false` otherwise. |
 | `has-critical` | `true` if any CRITICAL severity findings were identified. |
 | `has-high` | `true` if any HIGH or CRITICAL severity findings were identified. |

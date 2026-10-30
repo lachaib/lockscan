@@ -59,6 +59,14 @@ inputs:
       Code Scanning tab with inline PR annotations and alert lifecycle.
     required: false
 
+  artifacts-dir:
+    description: >
+      Extract downloaded artifacts into a new lockscan-* subdirectory of this
+      directory and keep them for the rest of the job, so later steps can open
+      the files that findings point at. Only that subdirectory is removed, by
+      the action's post step. See the artifacts-path output.
+    required: false
+
   annotate:
     description: >
       Emit GitHub workflow annotations on the dependency manifest file
@@ -106,6 +114,10 @@ outputs:
     description: >
       SARIF 2.1.0 report as a JSON string. Only set when sarif-to-file is
       specified.
+  artifacts-path:
+    description: >
+      Directory holding the extracted artifacts. Only set when artifacts-dir
+      is specified.
   has-findings:
     description: >
       'true' if any security findings were identified, 'false' otherwise.
@@ -120,3 +132,5 @@ outputs:
 runs:
   using: 'node24'
   main: 'dist/action.cjs'
+  post: 'dist/post.cjs'
+  post-if: always()

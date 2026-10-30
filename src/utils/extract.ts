@@ -1,5 +1,5 @@
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
-import { extname, join, relative } from 'node:path';
+import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import AdmZip from 'adm-zip';
 import * as tar from 'tar';
 import { isNativeBinary } from '../ecosystems/shared/binary-formats.js';
@@ -41,6 +41,18 @@ export async function extractTarball(
     await unlink(tmpFile).catch(() => {});
   }
   return collectFiles(destDir, fileExtensions);
+}
+
+/** Writes every entry of a .whl / .zip archive under destDir, refusing entries that escape it. */
+export async function extractZipToDir(data: Buffer, destDir: string): Promise<void> {
+  const root = resolve(destDir);
+  for (const entry of new AdmZip(data).getEntries()) {
+    if (entry.isDirectory) continue;
+    const target = resolve(root, entry.entryName);
+    if (!target.startsWith(root + sep)) continue;
+    await mkdir(dirname(target), { recursive: true });
+    await writeFile(target, entry.getData());
+  }
 }
 
 /** Compiled native extensions — structurally ELF/Mach-O/PE regardless of the ecosystem's own extension convention. */
