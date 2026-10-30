@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import * as core from '@actions/core';
 import { context } from '@actions/github';
 import { emitAnnotations } from './github/annotations.js';
@@ -53,7 +54,10 @@ import { parsePlatform } from './platforms.js';
     core.setOutput('report', reportJson);
 
     const jsonFile = core.getInput('json-to-file');
-    if (jsonFile) writeFileSync(jsonFile, reportJson);
+    if (jsonFile) {
+      mkdirSync(dirname(jsonFile), { recursive: true });
+      writeFileSync(jsonFile, reportJson);
+    }
 
     const maxSev = reportMaxSeverity(report);
     const hasFindings = maxSev !== null;
