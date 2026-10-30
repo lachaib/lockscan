@@ -33501,7 +33501,10 @@ async function analyze2(report, options = {}) {
     const workspace = process.env.GITHUB_WORKSPACE ?? process.cwd();
     const prNumber = context2.payload.pull_request?.number;
     const report = await analyze2(diffReport, { platforms, onlyTypes });
-    setOutput("report", JSON.stringify(report));
+    const reportJson = JSON.stringify(report);
+    setOutput("report", reportJson);
+    const jsonFile = getInput("json-to-file");
+    if (jsonFile) (0, import_node_fs8.writeFileSync)(jsonFile, reportJson);
     const maxSev = reportMaxSeverity(report);
     const hasFindings = maxSev !== null;
     setOutput("has-findings", String(hasFindings));

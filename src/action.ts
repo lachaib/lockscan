@@ -49,7 +49,11 @@ import { parsePlatform } from './platforms.js';
     const report = await analyze(diffReport, { platforms, onlyTypes });
 
     // --- Outputs ---
-    core.setOutput('report', JSON.stringify(report));
+    const reportJson = JSON.stringify(report);
+    core.setOutput('report', reportJson);
+
+    const jsonFile = core.getInput('json-to-file');
+    if (jsonFile) writeFileSync(jsonFile, reportJson);
 
     const maxSev = reportMaxSeverity(report);
     const hasFindings = maxSev !== null;
