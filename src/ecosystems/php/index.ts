@@ -1,13 +1,13 @@
 import type { PackageChange } from 'lockdelta';
 import type { PackageAnalysis } from '../../types.js';
-import type { FileMap } from '../../utils/extract.js';
-import { extractZip } from '../../utils/extract.js';
+import type { ArchiveLink, FileMap } from '../../utils/extract.js';
+import { extractZip, zipLinks } from '../../utils/extract.js';
 import type { AnalysisOptions, EcosystemAnalyzer } from '../base.js';
 import { diffFiles } from '../shared/diff.js';
 import { annotateHooks, detectComposerHooks } from '../shared/install-hooks.js';
 import { checkRegistry } from '../shared/registry-check.js';
 import { checkRepoRelease } from '../shared/repo-check.js';
-import { findingsDelta, scanPatterns } from '../shared/scan.js';
+import { findingsDelta, linkFindings, scanPatterns } from '../shared/scan.js';
 import {
   computeMetadataDelta,
   downloadArtifact,
@@ -71,14 +71,19 @@ export class PhpAnalyzer implements EcosystemAnalyzer {
         };
       }
 
+      const newLinks: ArchiveLink[] = [];
       const [newFiles, repoCheck] = await Promise.all([
-        downloadArtifact(artifact.url).then((data) =>
-          stripTopLevel(extractZip(data, PHP_EXTENSIONS)),
-        ),
+        downloadArtifact(artifact.url).then((data) => {
+          newLinks.push(...zipLinks(data));
+          return stripTopLevel(extractZip(data, PHP_EXTENSIONS));
+        }),
         checkRepoRelease({ repoUrl, packageName: name, oldVersion: null, newVersion: new_version }),
       ]);
 
-      const newFindings = scanPatterns(newFiles, DANGEROUS_PATTERNS);
+      const newFindings = [
+        ...scanPatterns(newFiles, DANGEROUS_PATTERNS),
+        ...linkFindings(newLinks),
+      ];
       const newHooks = detectComposerHooks(newFiles);
 
       return {
@@ -123,17 +128,21 @@ export class PhpAnalyzer implements EcosystemAnalyzer {
       };
     }
 
+    const newLinks: ArchiveLink[] = [];
+    const oldLinks: ArchiveLink[] = [];
     const downloads: Array<Promise<FileMap>> = [
-      downloadArtifact(newArtifact.url).then((data) =>
-        stripTopLevel(extractZip(data, PHP_EXTENSIONS)),
-      ),
+      downloadArtifact(newArtifact.url).then((data) => {
+        newLinks.push(...zipLinks(data));
+        return stripTopLevel(extractZip(data, PHP_EXTENSIONS));
+      }),
     ];
 
     if (oldArtifact) {
       downloads.push(
-        downloadArtifact(oldArtifact.url).then((data) =>
-          stripTopLevel(extractZip(data, PHP_EXTENSIONS)),
-        ),
+        downloadArtifact(oldArtifact.url).then((data) => {
+          oldLinks.push(...zipLinks(data));
+          return stripTopLevel(extractZip(data, PHP_EXTENSIONS));
+        }),
       );
     }
 
@@ -149,8 +158,8 @@ export class PhpAnalyzer implements EcosystemAnalyzer {
     ]);
 
     const oldFiles = maybeOldFiles;
-    const newFindings = scanPatterns(newFiles, DANGEROUS_PATTERNS);
-    const oldFindings = scanPatterns(oldFiles, DANGEROUS_PATTERNS);
+    const newFindings = [...scanPatterns(newFiles, DANGEROUS_PATTERNS), ...linkFindings(newLinks)];
+    const oldFindings = [...scanPatterns(oldFiles, DANGEROUS_PATTERNS), ...linkFindings(oldLinks)];
     const annotated = annotateHooks(detectComposerHooks(oldFiles), detectComposerHooks(newFiles));
     const metadataDelta = computeMetadataDelta(oldFetched.meta, newFetched.meta);
 

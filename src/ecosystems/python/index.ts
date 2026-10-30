@@ -2,11 +2,13 @@ import { join } from 'node:path';
 import type { PackageChange } from 'lockdelta';
 import type { PackageAnalysis, SecurityFinding } from '../../types.js';
 import {
+  type ArchiveLink,
   extractTarball,
   extractZip,
   extractZipBinaries,
   extractZipToDir,
   type FileMap,
+  zipLinks,
 } from '../../utils/extract.js';
 import type { AnalysisOptions, EcosystemAnalyzer } from '../base.js';
 import { type BinaryScan, binaryFindingsDelta, scanBinary } from '../shared/binary-scan.js';
@@ -15,7 +17,7 @@ import { annotateHooks, detectPythonWheelHooks } from '../shared/install-hooks.j
 import { compareProvenance } from '../shared/provenance-check.js';
 import { checkRegistry } from '../shared/registry-check.js';
 import { checkRepoRelease } from '../shared/repo-check.js';
-import { findingsDelta, scanPatterns } from '../shared/scan.js';
+import { findingsDelta, linkFindings, scanPatterns } from '../shared/scan.js';
 import { DANGEROUS_PATTERNS, PY_EXTENSIONS } from './patterns.js';
 import {
   computeMetadataDelta,
@@ -45,16 +47,19 @@ async function scanArtifacts(
     artifacts.map(async (artifact) => {
       const data = await downloadAndVerify(artifact);
       let files: FileMap;
+      const links: ArchiveLink[] = [];
       let binaryScans: Map<string, BinaryScan>;
       if (artifact.isSdist) {
         files = await extractTarball(
           data,
           join(tmpDir, `${tag}_${artifact.sha256.slice(0, 8)}`),
           PY_EXTENSIONS,
+          links,
         );
         binaryScans = new Map();
       } else {
         files = extractZip(data, PY_EXTENSIONS);
+        links.push(...zipLinks(data));
         if (keep)
           await extractZipToDir(data, join(tmpDir, `${tag}_${artifact.sha256.slice(0, 8)}`));
         const binaries = extractZipBinaries(data);
@@ -62,7 +67,12 @@ async function scanArtifacts(
           [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)]),
         );
       }
-      return { artifact, files, findings: scanPatterns(files, DANGEROUS_PATTERNS), binaryScans };
+      return {
+        artifact,
+        files,
+        findings: [...scanPatterns(files, DANGEROUS_PATTERNS), ...linkFindings(links)],
+        binaryScans,
+      };
     }),
   );
 }

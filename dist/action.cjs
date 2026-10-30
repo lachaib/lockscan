@@ -26516,6 +26516,7 @@ var SEVERITY_RANK = {
 };
 var CRITICAL_PATTERNS = /* @__PURE__ */ new Set(["cred:ci-token"]);
 var HIGH_PATTERNS = /* @__PURE__ */ new Set([
+  "archive:symlink-escape",
   "exec:eval",
   "exec:exec",
   "exec:compile",
@@ -26528,6 +26529,7 @@ var HIGH_PATTERNS = /* @__PURE__ */ new Set([
   "deser:marshal"
 ]);
 var MODERATE_PATTERNS = /* @__PURE__ */ new Set([
+  "archive:symlink",
   "shell:require-child_process",
   "shell:execSync",
   "shell:spawnSync",
@@ -30465,6 +30467,12 @@ function parsePeImports(data) {
 }
 
 // src/utils/extract.ts
+function classifyLink(name, target, relativeToEntry) {
+  if (target.startsWith("/") || (0, import_node_path11.isAbsolute)(target)) return { name, target, escapes: true };
+  const base = relativeToEntry ? import_node_path11.posix.dirname(name) : "";
+  const resolved = import_node_path11.posix.normalize(import_node_path11.posix.join(base, target.replace(/\\/g, "/")));
+  return { name, target, escapes: resolved === ".." || resolved.startsWith("../") };
+}
 var SKIP_DIRS = /* @__PURE__ */ new Set([
   "__pycache__",
   ".git",
@@ -30476,22 +30484,44 @@ var SKIP_DIRS = /* @__PURE__ */ new Set([
   ".ruff_cache"
 ]);
 var BINARY_SKIP_DIRS = /* @__PURE__ */ new Set([".git", "node_modules"]);
-async function extractTarball(data, destDir, fileExtensions) {
+async function extractTarball(data, destDir, fileExtensions, links = []) {
   await (0, import_promises2.mkdir)(destDir, { recursive: true });
   const tmpFile = `${destDir}.__archive.tgz`;
   await (0, import_promises2.writeFile)(tmpFile, data);
   try {
-    await uo({ file: tmpFile, cwd: destDir, strip: 1 });
+    await uo({
+      file: tmpFile,
+      cwd: destDir,
+      strip: 1,
+      filter: (path, entry) => {
+        const type = entry.type;
+        if (type !== "SymbolicLink" && type !== "Link") return true;
+        const name = path.split("/").slice(1).join("/");
+        const raw = String(entry.linkpath ?? "");
+        const isHard = type === "Link" && !raw.startsWith("/");
+        const target = isHard ? raw.split("/").slice(1).join("/") || "." : raw;
+        links.push(classifyLink(name, target, !isHard));
+        return false;
+      }
+    });
   } finally {
     await (0, import_promises2.unlink)(tmpFile).catch(() => {
     });
   }
   return collectFiles(destDir, fileExtensions);
 }
+var UNIX_SYMLINK = 40960;
+var UNIX_TYPE_MASK = 61440;
+function isZipSymlink(entry) {
+  return (entry.header.attr >>> 16 & UNIX_TYPE_MASK) === UNIX_SYMLINK;
+}
+function zipLinks(data) {
+  return new import_adm_zip.default(data).getEntries().filter(isZipSymlink).map((e) => classifyLink(e.entryName, e.getData().toString("utf8"), true));
+}
 async function extractZipToDir(data, destDir) {
   const root = (0, import_node_path11.resolve)(destDir);
   for (const entry of new import_adm_zip.default(data).getEntries()) {
-    if (entry.isDirectory) continue;
+    if (entry.isDirectory || isZipSymlink(entry)) continue;
     const target = (0, import_node_path11.resolve)(root, entry.entryName);
     if (!target.startsWith(root + import_node_path11.sep)) continue;
     await (0, import_promises2.mkdir)((0, import_node_path11.dirname)(target), { recursive: true });
@@ -30533,7 +30563,7 @@ function extractZip(data, fileExtensions) {
   const files = /* @__PURE__ */ new Map();
   const zip = new import_adm_zip.default(data);
   for (const entry of zip.getEntries()) {
-    if (entry.isDirectory) continue;
+    if (entry.isDirectory || isZipSymlink(entry)) continue;
     if (!fileExtensions.has((0, import_node_path11.extname)(entry.entryName))) continue;
     try {
       files.set(entry.entryName, entry.getData().toString("utf8"));
@@ -31920,6 +31950,14 @@ function scanPatterns(files, patterns) {
   }
   return findings;
 }
+function linkFindings(links) {
+  return links.map(({ name, target, escapes }) => ({
+    file: name,
+    line: 0,
+    label: escapes ? "archive:symlink-escape" : "archive:symlink",
+    detail: target
+  }));
+}
 function findingsDelta(oldFindings, newFindings) {
   const oldSet = new Set(oldFindings.map((f2) => `${f2.file}\0${f2.label}`));
   return newFindings.filter((f2) => !oldSet.has(`${f2.file}\0${f2.label}`));
@@ -32071,12 +32109,13 @@ var JSR_EXTENSIONS = /* @__PURE__ */ new Set([".ts", ".tsx", ".js", ".mjs", ".js
 
 // src/ecosystems/deno/index.ts
 async function scanNpmArtifact(data, destDir) {
-  const files = await extractTarball(data, destDir, NPM_EXTENSIONS);
+  const links = [];
+  const files = await extractTarball(data, destDir, NPM_EXTENSIONS, links);
   const binaries = await extractTarballBinaries(destDir);
   const binaryScans = new Map(
     [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)])
   );
-  return { files, binaryScans };
+  return { files, binaryScans, linkFindings: linkFindings(links) };
 }
 var DenoAnalyzer = class {
   ecosystem = "deno";
@@ -32137,7 +32176,10 @@ var DenoAnalyzer = class {
         extractRegistryInfo(newMeta2),
         checkRepoRelease({ repoUrl: repoUrl2, packageName: name, oldVersion: null, newVersion })
       ]);
-      const newFindings2 = scanPatterns(newScan2.files, DANGEROUS_PATTERNS2);
+      const newFindings2 = [
+        ...scanPatterns(newScan2.files, DANGEROUS_PATTERNS2),
+        ...newScan2.linkFindings
+      ];
       const newHooks = detectNpmHooks(newScan2.files);
       const binaryDelta2 = binaryFindingsDelta(/* @__PURE__ */ new Map(), newScan2.binaryScans);
       return {
@@ -32177,8 +32219,14 @@ var DenoAnalyzer = class {
       fetchNpmProvenance(newMeta)
     ]);
     const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
-    const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS2);
-    const oldFindings = scanPatterns(oldScan.files, DANGEROUS_PATTERNS2);
+    const newFindings = [
+      ...scanPatterns(newScan.files, DANGEROUS_PATTERNS2),
+      ...newScan.linkFindings
+    ];
+    const oldFindings = [
+      ...scanPatterns(oldScan.files, DANGEROUS_PATTERNS2),
+      ...oldScan.linkFindings
+    ];
     const annotated = annotateHooks(detectNpmHooks(oldScan.files), detectNpmHooks(newScan.files));
     const binaryDelta = binaryFindingsDelta(oldScan.binaryScans, newScan.binaryScans);
     const metadataDelta = computeMetadataDelta(oldMeta, newMeta);
@@ -32216,12 +32264,15 @@ var DenoAnalyzer = class {
       const meta = await fetchJsrVersion(jsrName, version);
       const artifact = getArtifactInfo(meta);
       const data = await downloadNpmTarball(artifact.url);
+      const links = [];
       return {
         files: await extractTarball(
           data,
           (0, import_node_path12.join)(options.tmpDir, `deno_jsr_${safeName}_${version}_${slot}`),
-          JSR_EXTENSIONS
+          JSR_EXTENSIONS,
+          links
         ),
+        linkFindings: linkFindings(links),
         meta,
         artifact
       };
@@ -32238,7 +32289,8 @@ var DenoAnalyzer = class {
       const {
         files: newFiles2,
         meta: newMeta2,
-        artifact: newArtifact2
+        artifact: newArtifact2,
+        linkFindings: newLinkFindings
       } = await download(newVersion, "new")();
       const [repoUrl2, registryInfo] = await Promise.all([
         resolveJsrRepoUrl(jsrName, newMeta2),
@@ -32247,7 +32299,7 @@ var DenoAnalyzer = class {
       const [repoCheck2] = await Promise.all([
         checkRepoRelease({ repoUrl: repoUrl2, packageName: jsrName, oldVersion: null, newVersion })
       ]);
-      const newFindings2 = scanPatterns(newFiles2, DANGEROUS_PATTERNS2);
+      const newFindings2 = [...scanPatterns(newFiles2, DANGEROUS_PATTERNS2), ...newLinkFindings];
       return {
         ...base,
         oldVersion: null,
@@ -32286,8 +32338,8 @@ var DenoAnalyzer = class {
       oldVersion,
       newVersion
     });
-    const newFindings = scanPatterns(newFiles, DANGEROUS_PATTERNS2);
-    const oldFindings = scanPatterns(oldFiles, DANGEROUS_PATTERNS2);
+    const newFindings = [...scanPatterns(newFiles, DANGEROUS_PATTERNS2), ...newResult.linkFindings];
+    const oldFindings = [...scanPatterns(oldFiles, DANGEROUS_PATTERNS2), ...oldResult.linkFindings];
     const jsrDelta = computeJsrMetadataDelta(oldMeta, newMeta);
     return {
       ...base,
@@ -32331,12 +32383,13 @@ function checkNpmNativeBuild(oldFiles, newFiles) {
   return false;
 }
 async function scanNpmArtifact2(data, destDir) {
-  const files = await extractTarball(data, destDir, JS_EXTENSIONS);
+  const links = [];
+  const files = await extractTarball(data, destDir, JS_EXTENSIONS, links);
   const binaries = await extractTarballBinaries(destDir);
   const binaryScans = new Map(
     [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)])
   );
-  return { files, binaryScans };
+  return { files, binaryScans, linkFindings: linkFindings(links) };
 }
 var JavaScriptAnalyzer = class {
   ecosystem = "javascript";
@@ -32371,7 +32424,10 @@ var JavaScriptAnalyzer = class {
         extractRegistryInfo(newMeta2),
         checkRepoRelease({ repoUrl: repoUrl2, packageName: name, oldVersion: null, newVersion: new_version })
       ]);
-      const newFindings2 = scanPatterns(newScan2.files, DANGEROUS_PATTERNS);
+      const newFindings2 = [
+        ...scanPatterns(newScan2.files, DANGEROUS_PATTERNS),
+        ...newScan2.linkFindings
+      ];
       const newHooks = detectNpmHooks(newScan2.files);
       const binaryDelta2 = binaryFindingsDelta(/* @__PURE__ */ new Map(), newScan2.binaryScans);
       return {
@@ -32416,8 +32472,14 @@ var JavaScriptAnalyzer = class {
       fetchNpmProvenance(newMeta)
     ]);
     const provenanceCheck = compareProvenance(oldProvenance, newProvenance);
-    const newFindings = scanPatterns(newScan.files, DANGEROUS_PATTERNS);
-    const oldFindings = scanPatterns(oldScan.files, DANGEROUS_PATTERNS);
+    const newFindings = [
+      ...scanPatterns(newScan.files, DANGEROUS_PATTERNS),
+      ...newScan.linkFindings
+    ];
+    const oldFindings = [
+      ...scanPatterns(oldScan.files, DANGEROUS_PATTERNS),
+      ...oldScan.linkFindings
+    ];
     const annotated = annotateHooks(detectNpmHooks(oldScan.files), detectNpmHooks(newScan.files));
     const binaryDelta = binaryFindingsDelta(oldScan.binaryScans, newScan.binaryScans);
     const buildSystemChanged = checkNpmNativeBuild(oldScan.files, newScan.files);
@@ -32628,13 +32690,18 @@ var PhpAnalyzer = class {
           ...registryCheck && { registryCheck }
         };
       }
+      const newLinks2 = [];
       const [newFiles2, repoCheck2] = await Promise.all([
-        downloadArtifact(artifact.url).then(
-          (data) => stripTopLevel(extractZip(data, PHP_EXTENSIONS))
-        ),
+        downloadArtifact(artifact.url).then((data) => {
+          newLinks2.push(...zipLinks(data));
+          return stripTopLevel(extractZip(data, PHP_EXTENSIONS));
+        }),
         checkRepoRelease({ repoUrl: repoUrl2, packageName: name, oldVersion: null, newVersion: new_version })
       ]);
-      const newFindings2 = scanPatterns(newFiles2, DANGEROUS_PATTERNS3);
+      const newFindings2 = [
+        ...scanPatterns(newFiles2, DANGEROUS_PATTERNS3),
+        ...linkFindings(newLinks2)
+      ];
       const newHooks = detectComposerHooks(newFiles2);
       return {
         ...base,
@@ -32673,16 +32740,20 @@ var PhpAnalyzer = class {
         ...registryCheck && { registryCheck }
       };
     }
+    const newLinks = [];
+    const oldLinks = [];
     const downloads = [
-      downloadArtifact(newArtifact.url).then(
-        (data) => stripTopLevel(extractZip(data, PHP_EXTENSIONS))
-      )
+      downloadArtifact(newArtifact.url).then((data) => {
+        newLinks.push(...zipLinks(data));
+        return stripTopLevel(extractZip(data, PHP_EXTENSIONS));
+      })
     ];
     if (oldArtifact) {
       downloads.push(
-        downloadArtifact(oldArtifact.url).then(
-          (data) => stripTopLevel(extractZip(data, PHP_EXTENSIONS))
-        )
+        downloadArtifact(oldArtifact.url).then((data) => {
+          oldLinks.push(...zipLinks(data));
+          return stripTopLevel(extractZip(data, PHP_EXTENSIONS));
+        })
       );
     }
     const [newFiles, maybeOldFiles, repoCheck] = await Promise.all([
@@ -32696,8 +32767,8 @@ var PhpAnalyzer = class {
       })
     ]);
     const oldFiles = maybeOldFiles;
-    const newFindings = scanPatterns(newFiles, DANGEROUS_PATTERNS3);
-    const oldFindings = scanPatterns(oldFiles, DANGEROUS_PATTERNS3);
+    const newFindings = [...scanPatterns(newFiles, DANGEROUS_PATTERNS3), ...linkFindings(newLinks)];
+    const oldFindings = [...scanPatterns(oldFiles, DANGEROUS_PATTERNS3), ...linkFindings(oldLinks)];
     const annotated = annotateHooks(detectComposerHooks(oldFiles), detectComposerHooks(newFiles));
     const metadataDelta = computeMetadataDelta2(oldFetched.meta, newFetched.meta);
     return {
@@ -32966,16 +33037,19 @@ async function scanArtifacts(artifacts, tmpDir, tag, keep) {
     artifacts.map(async (artifact) => {
       const data = await downloadAndVerify(artifact);
       let files;
+      const links = [];
       let binaryScans;
       if (artifact.isSdist) {
         files = await extractTarball(
           data,
           (0, import_node_path14.join)(tmpDir, `${tag}_${artifact.sha256.slice(0, 8)}`),
-          PY_EXTENSIONS
+          PY_EXTENSIONS,
+          links
         );
         binaryScans = /* @__PURE__ */ new Map();
       } else {
         files = extractZip(data, PY_EXTENSIONS);
+        links.push(...zipLinks(data));
         if (keep)
           await extractZipToDir(data, (0, import_node_path14.join)(tmpDir, `${tag}_${artifact.sha256.slice(0, 8)}`));
         const binaries = extractZipBinaries(data);
@@ -32983,7 +33057,12 @@ async function scanArtifacts(artifacts, tmpDir, tag, keep) {
           [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)])
         );
       }
-      return { artifact, files, findings: scanPatterns(files, DANGEROUS_PATTERNS4), binaryScans };
+      return {
+        artifact,
+        files,
+        findings: [...scanPatterns(files, DANGEROUS_PATTERNS4), ...linkFindings(links)],
+        binaryScans
+      };
     })
   );
 }
