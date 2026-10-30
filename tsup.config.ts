@@ -18,7 +18,7 @@ export default defineConfig([
     sourcemap: true,
   },
   {
-    entry: { action: 'src/action.ts' },
+    entry: { action: 'src/action.ts', post: 'src/post.ts' },
     format: ['cjs'],
     target: 'node24',
     dts: false,

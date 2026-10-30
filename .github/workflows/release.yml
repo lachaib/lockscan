@@ -55,7 +55,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json && git add -f dist/action.cjs dist/action.cjs.map
+          git add package.json && git add -f dist/action.cjs dist/action.cjs.map dist/post.cjs dist/post.cjs.map
           git commit -m "chore(release): ${{ steps.version.outputs.tag }}"
           git push origin main
 

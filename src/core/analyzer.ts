@@ -22,7 +22,8 @@ export async function analyze(
 
   progress(`Platforms: ${platforms.map(platformLabel).join(', ')}\n`);
 
-  const tmpDir = await mkdtemp(join(tmpdir(), 'lockscan-'));
+  const keepArtifacts = Boolean(options.artifactsDir);
+  const tmpDir = options.artifactsDir ?? (await mkdtemp(join(tmpdir(), 'lockscan-')));
   try {
     const lockfileAnalyses: LockfileAnalysis[] = [];
 
@@ -67,6 +68,7 @@ export async function analyze(
           const rawAnalysis = await analyzer.analyzeChange(change, {
             platforms,
             tmpDir: join(tmpDir, lf.ecosystem),
+            keepArtifacts,
           });
           // Weak, version-shape-only confusion signals (e.g. a round major bump like
           // 50.0.0) need corroboration from the repo check before they're treated as
@@ -109,7 +111,7 @@ export async function analyze(
 
     return buildReport(report, lockfileAnalyses);
   } finally {
-    await rm(tmpDir, { recursive: true, force: true });
+    if (!keepArtifacts) await rm(tmpDir, { recursive: true, force: true });
   }
 }
 

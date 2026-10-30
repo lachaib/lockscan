@@ -9,6 +9,7 @@ import { generateSarif } from './github/sarif.js';
 import { reportMaxSeverity, shouldFail } from './github/severity.js';
 import { analyze } from './index.js';
 import { parsePlatform } from './platforms.js';
+import { prepareArtifactsDir } from './utils/artifacts-dir.js';
 
 (async () => {
   try {
@@ -46,8 +47,17 @@ import { parsePlatform } from './platforms.js';
     const workspace = process.env.GITHUB_WORKSPACE ?? process.cwd();
     const prNumber = context.payload.pull_request?.number;
 
+    const artifactsInput = core.getInput('artifacts-dir');
+    const artifactsDir = artifactsInput
+      ? await prepareArtifactsDir(artifactsInput, workspace)
+      : undefined;
+    if (artifactsDir) {
+      core.saveState('artifacts-dir', artifactsDir);
+      core.setOutput('artifacts-path', artifactsDir);
+    }
+
     // --- Analyze ---
-    const report = await analyze(diffReport, { platforms, onlyTypes });
+    const report = await analyze(diffReport, { platforms, onlyTypes, artifactsDir });
 
     // --- Outputs ---
     const reportJson = JSON.stringify(report);
