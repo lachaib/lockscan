@@ -17,8 +17,8 @@ import { annotateHooks, detectPythonWheelHooks } from '../shared/install-hooks.j
 import { compareProvenance } from '../shared/provenance-check.js';
 import { checkRegistry } from '../shared/registry-check.js';
 import { checkRepoRelease } from '../shared/repo-check.js';
-import { findingsDelta, linkFindings, scanPatterns } from '../shared/scan.js';
-import { DANGEROUS_PATTERNS, PY_EXTENSIONS } from './patterns.js';
+import { findingsDelta, linkFindings } from '../shared/scan.js';
+import { PY_EXTENSIONS } from './patterns.js';
 import {
   computeMetadataDelta,
   downloadAndVerify,
@@ -29,6 +29,7 @@ import {
   type PyPIArtifact,
   selectArtifacts,
 } from './pypi.js';
+import { scanPythonPatterns } from './scan.js';
 
 interface WheelScan {
   artifact: PyPIArtifact;
@@ -70,7 +71,7 @@ async function scanArtifacts(
       return {
         artifact,
         files,
-        findings: [...scanPatterns(files, DANGEROUS_PATTERNS), ...linkFindings(links)],
+        findings: [...scanPythonPatterns(files), ...linkFindings(links)],
         binaryScans,
       };
     }),
