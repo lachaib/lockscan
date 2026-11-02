@@ -53,15 +53,14 @@
   "dependencies": {
     "@actions/core": "^3.0.1",
     "@actions/github": "^9.1.1",
-    "adm-zip": "^0.5.17",
+    "adm-zip": "^0.6.1",
     "commander": "14.0.3",
     "diff": "^9.0.0",
-    "lockdelta": "^0.1.4",
-    "tar": "^7.5.16"
+    "lockdelta": "^0.1.10",
+    "tar": "^7.5.22"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
-    "@types/adm-zip": "^0.5.8",
     "@types/node": "25.9.1",
     "husky": "9.1.7",
     "tsup": "8.5.1",
