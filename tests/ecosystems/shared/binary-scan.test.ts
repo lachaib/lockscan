@@ -65,3 +65,55 @@ describe('binaryFindingsDelta — native symbol findings', () => {
     expect(binaryFindingsDelta(oldScans, newScans)).toEqual([]);
   });
 });
+
+describe('scanBinary — base64 precision (issue #24)', () => {
+  const withString = (text: string) => Buffer.from(`\0\0\0${text}\0\0\0`, 'latin1');
+  const labels = (text: string) =>
+    scanBinary('x.so', withString(text)).suspiciousStrings.map((s) => s.label);
+
+  it('ignores repetitive compiled data tables that only look like base64', () => {
+    expect(
+      labels('RASARARARARASARARASASASATASARATARAUARARARARARARASARARARARARARARARAUAUASAUASAR'),
+    ).toEqual([]);
+  });
+
+  it('ignores pure-hex runs such as key ids and digests', () => {
+    expect(labels('3a7bd3e2360a3d29eea436fcfb7e44c735d117c42d1c1835420b6b9942dd4f1b')).toEqual([]);
+    expect(labels(`${'0123456789abcdef'.repeat(4)}`)).toEqual([]);
+  });
+
+  it('still flags a real base64 payload', () => {
+    const payload = Buffer.from(Array.from({ length: 96 }, (_, i) => (i * 37 + 11) % 256)).toString(
+      'base64',
+    );
+    expect(labels(payload)).toEqual(['binary:base64']);
+  });
+});
+
+describe('binaryFindingsDelta — hash-prefixed filenames (issue #24)', () => {
+  const scan = (filename: string, text: string) =>
+    scanBinary(filename, Buffer.from(`\0\0${text}\0\0`));
+
+  it('pairs a binary whose build-hash prefix changed instead of treating it as new', () => {
+    const url = 'http://example.com/docs/page';
+    const oldScans = new Map([
+      ['aaaaaaaaaaaaaaaaaaaa__mypyc.so', scan('aaaaaaaaaaaaaaaaaaaa__mypyc.so', url)],
+    ]);
+    const newScans = new Map([
+      ['bbbbbbbbbbbbbbbbbbbb__mypyc.so', scan('bbbbbbbbbbbbbbbbbbbb__mypyc.so', url)],
+    ]);
+    expect(binaryFindingsDelta(oldScans, newScans)).toEqual([]);
+  });
+
+  it('keeps reporting a genuinely new string in the paired binary', () => {
+    const oldScans = new Map([
+      ['aaaaaaaaaaaaaaaaaaaa__m.so', scan('aaaaaaaaaaaaaaaaaaaa__m.so', 'nothing here')],
+    ]);
+    const newScans = new Map([
+      ['bbbbbbbbbbbbbbbbbbbb__m.so', scan('bbbbbbbbbbbbbbbbbbbb__m.so', 'wss://evil.example/ws')],
+    ]);
+    expect(binaryFindingsDelta(oldScans, newScans).map((f) => f.label)).toEqual([
+      'binary:url-other-scheme',
+    ]);
+  });
+});

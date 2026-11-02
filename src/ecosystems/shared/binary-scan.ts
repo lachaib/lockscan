@@ -103,6 +103,25 @@ const SUSPICIOUS_STRING_PATTERNS: SuspiciousStringPattern[] = [
   },
 ];
 
+/** Hex digits are inside the base64 alphabet and just as high-entropy, so a pure-hex run (key ids, hashes) is never base64. */
+const HEX_ONLY = /^[0-9a-fA-F]+$/;
+const BASE64_MIN_ENTROPY = 4;
+const BASE64_MIN_DISTINCT = 16;
+
+/** Real base64 of non-trivial data uses most of the alphabet; compiled data tables repeat a few characters. */
+function looksLikeBase64(text: string): boolean {
+  if (HEX_ONLY.test(text)) return false;
+  const freq = new Map<string, number>();
+  for (const ch of text) freq.set(ch, (freq.get(ch) ?? 0) + 1);
+  if (freq.size < BASE64_MIN_DISTINCT) return false;
+  let entropy = 0;
+  for (const n of freq.values()) {
+    const p = n / text.length;
+    entropy -= p * Math.log2(p);
+  }
+  return entropy >= BASE64_MIN_ENTROPY;
+}
+
 const HIGH_ENTROPY_THRESHOLD = 7.2;
 const SYMBOL_COUNT_RATIO_THRESHOLD = 5;
 const SYMBOL_COUNT_ABS_THRESHOLD = 5;
@@ -184,7 +203,9 @@ export function scanBinary(filename: string, data: Buffer): BinaryScan {
   for (const s of strings) {
     if (seen.has(s)) continue;
     for (const { regex, label } of SUSPICIOUS_STRING_PATTERNS) {
-      if (regex.test(s)) {
+      const match = regex.exec(s);
+      if (match) {
+        if (label === 'binary:base64' && !looksLikeBase64(match[0])) continue;
         seen.add(s);
         suspiciousStrings.push({ text: s, label });
         break; // first matching pattern wins — most dangerous label assigned
@@ -230,6 +251,26 @@ function signatureDelta(
  * Compute what changed between old and new binary scans.
  * For added packages pass an empty Map for oldScans — all findings are then reported.
  */
+/** A leading build hash (e.g. mypyc's `<hex>__mypyc.so`) changes between versions without the binary being new. */
+function normalizeBinaryName(filename: string): string {
+  return filename.replace(/(^|\/)[0-9a-f]{8,}__/, '$1');
+}
+
+function pairOldScan(
+  filename: string,
+  oldScans: Map<string, BinaryScan>,
+  newScans: Map<string, BinaryScan>,
+): BinaryScan | undefined {
+  const exact = oldScans.get(filename);
+  if (exact) return exact;
+  const norm = normalizeBinaryName(filename);
+  if (norm === filename) return undefined;
+  const candidates = [...oldScans.keys()].filter(
+    (n) => !newScans.has(n) && normalizeBinaryName(n) === norm,
+  );
+  return candidates.length === 1 ? oldScans.get(candidates[0]) : undefined;
+}
+
 export function binaryFindingsDelta(
   oldScans: Map<string, BinaryScan>,
   newScans: Map<string, BinaryScan>,
@@ -237,7 +278,7 @@ export function binaryFindingsDelta(
   const findings: BinaryFinding[] = [];
 
   for (const [filename, newScan] of newScans) {
-    const oldScan = oldScans.get(filename);
+    const oldScan = pairOldScan(filename, oldScans, newScans);
 
     const signatureFinding = signatureDelta(filename, oldScan?.signature, newScan.signature);
     if (signatureFinding) findings.push(signatureFinding);

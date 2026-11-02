@@ -31038,6 +31038,21 @@ var SUSPICIOUS_STRING_PATTERNS = [
     label: "binary:base64"
   }
 ];
+var HEX_ONLY = /^[0-9a-fA-F]+$/;
+var BASE64_MIN_ENTROPY = 4;
+var BASE64_MIN_DISTINCT = 16;
+function looksLikeBase64(text) {
+  if (HEX_ONLY.test(text)) return false;
+  const freq = /* @__PURE__ */ new Map();
+  for (const ch of text) freq.set(ch, (freq.get(ch) ?? 0) + 1);
+  if (freq.size < BASE64_MIN_DISTINCT) return false;
+  let entropy = 0;
+  for (const n of freq.values()) {
+    const p2 = n / text.length;
+    entropy -= p2 * Math.log2(p2);
+  }
+  return entropy >= BASE64_MIN_ENTROPY;
+}
 var HIGH_ENTROPY_THRESHOLD = 7.2;
 var SYMBOL_COUNT_RATIO_THRESHOLD = 5;
 var SYMBOL_COUNT_ABS_THRESHOLD = 5;
@@ -31086,7 +31101,9 @@ function scanBinary(filename, data) {
   for (const s3 of strings) {
     if (seen.has(s3)) continue;
     for (const { regex, label } of SUSPICIOUS_STRING_PATTERNS) {
-      if (regex.test(s3)) {
+      const match = regex.exec(s3);
+      if (match) {
+        if (label === "binary:base64" && !looksLikeBase64(match[0])) continue;
         seen.add(s3);
         suspiciousStrings.push({ text: s3, label });
         break;
@@ -31120,10 +31137,23 @@ function signatureDelta(file, oldSig, newSig) {
   }
   return void 0;
 }
+function normalizeBinaryName(filename) {
+  return filename.replace(/(^|\/)[0-9a-f]{8,}__/, "$1");
+}
+function pairOldScan(filename, oldScans, newScans) {
+  const exact = oldScans.get(filename);
+  if (exact) return exact;
+  const norm = normalizeBinaryName(filename);
+  if (norm === filename) return void 0;
+  const candidates = [...oldScans.keys()].filter(
+    (n) => !newScans.has(n) && normalizeBinaryName(n) === norm
+  );
+  return candidates.length === 1 ? oldScans.get(candidates[0]) : void 0;
+}
 function binaryFindingsDelta(oldScans, newScans) {
   const findings = [];
   for (const [filename, newScan] of newScans) {
-    const oldScan = oldScans.get(filename);
+    const oldScan = pairOldScan(filename, oldScans, newScans);
     const signatureFinding = signatureDelta(filename, oldScan?.signature, newScan.signature);
     if (signatureFinding) findings.push(signatureFinding);
     if (newScan.entropy >= HIGH_ENTROPY_THRESHOLD) {
