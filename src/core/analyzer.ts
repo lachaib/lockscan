@@ -5,10 +5,11 @@ import type { DiffReport } from 'lockdelta';
 import { getAnalyzer } from '../ecosystems/index.js';
 import { reconcileConfusionSignal } from '../ecosystems/shared/registry-check.js';
 import { queryOsv } from '../ecosystems/shared/vuln-check.js';
+import { higher, withSeverity } from '../github/severity.js';
 import type { AnalyzeOptions } from '../index.js';
 import type { Platform } from '../platforms.js';
 import { detectHostPlatform, detectPythonVersion, platformLabel } from '../platforms.js';
-import type { LockfileAnalysis, PackageAnalysis, SecurityReport } from '../types.js';
+import type { LockfileAnalysis, PackageAnalysis, SecurityReport, Severity } from '../types.js';
 
 const DEFAULT_CHANGE_TYPES = new Set(['added', 'updated', 'removed']);
 
@@ -133,7 +134,26 @@ async function resolvePlatforms(
   return [host];
 }
 
-function buildReport(input: DiffReport, lockfiles: LockfileAnalysis[]): SecurityReport {
+function buildReport(input: DiffReport, rawLockfiles: LockfileAnalysis[]): SecurityReport {
+  const lockfiles = rawLockfiles.map((lf) => ({ ...lf, packages: lf.packages.map(withSeverity) }));
+  const bySeverity: Record<Severity, number> = { critical: 0, high: 0, moderate: 0, low: 0 };
+  const findingsBySeverity: Record<Severity, number> = {
+    critical: 0,
+    high: 0,
+    moderate: 0,
+    low: 0,
+  };
+  let maxSeverity: Severity | null = null;
+  for (const { packages } of lockfiles) {
+    for (const p of packages) {
+      for (const f of [...(p.securityFindings?.delta ?? []), ...(p.binaryFindings?.delta ?? [])]) {
+        if (f.severity) findingsBySeverity[f.severity]++;
+      }
+      if (!p.maxSeverity) continue;
+      bySeverity[p.maxSeverity]++;
+      maxSeverity = higher(maxSeverity, p.maxSeverity);
+    }
+  }
   const analyzed = lockfiles.reduce((s, lf) => s + lf.packages.length, 0);
   const errors = lockfiles.reduce((s, lf) => s + lf.packages.filter((p) => p.error).length, 0);
   const newSecurityFindings = lockfiles.reduce(
@@ -206,6 +226,9 @@ function buildReport(input: DiffReport, lockfiles: LockfileAnalysis[]): Security
       publisherChanges,
       licenseChanges,
       provenanceRegressions,
+      maxSeverity,
+      bySeverity,
+      findingsBySeverity,
       ecosystems,
     },
     lockfiles,

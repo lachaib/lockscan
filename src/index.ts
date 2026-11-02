@@ -7,10 +7,12 @@ export type { EcosystemAnalyzer } from './ecosystems/index.js';
 export { registerAnalyzer } from './ecosystems/index.js';
 export type { Platform } from './platforms.js';
 export type {
+  BinaryFinding,
   LockfileAnalysis,
   PackageAnalysis,
   SecurityFinding,
   SecurityReport,
+  Severity,
 } from './types.js';
 
 export interface AnalyzeOptions {

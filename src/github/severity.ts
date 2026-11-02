@@ -1,6 +1,6 @@
-import type { PackageAnalysis, SecurityFinding, SecurityReport } from '../types.js';
+import type { PackageAnalysis, SecurityFinding, SecurityReport, Severity } from '../types.js';
 
-export type Severity = 'critical' | 'high' | 'moderate' | 'low';
+export type { Severity } from '../types.js';
 
 export const SEVERITY_RANK: Record<Severity, number> = {
   critical: 4,
@@ -219,4 +219,40 @@ export function annotationLevel(sev: Severity): 'error' | 'warning' | 'notice' {
   if (sev === 'critical' || sev === 'high') return 'error';
   if (sev === 'moderate') return 'warning';
   return 'notice';
+}
+
+/** Returns the package with per-finding severity, rule ids and `maxSeverity` filled in. */
+export function withSeverity(pkg: PackageAnalysis): PackageAnalysis {
+  if (pkg.error) return pkg;
+  const out: PackageAnalysis = { ...pkg, maxSeverity: packageMaxSeverity(pkg) };
+
+  if (pkg.securityFindings) {
+    const { old: oldF, new: newF, delta } = pkg.securityFindings;
+    const oldCount = countByLabel(oldF);
+    const newCount = countByLabel(newF);
+    out.securityFindings = {
+      ...pkg.securityFindings,
+      delta: delta.map((f) => ({
+        ...f,
+        rule: f.label,
+        severity: effectivePatternSeverity(f.label, oldCount, newCount),
+      })),
+    };
+  }
+
+  if (pkg.binaryFindings) {
+    out.binaryFindings = {
+      ...pkg.binaryFindings,
+      delta: pkg.binaryFindings.delta.map((f) => {
+        const isNative = f.label.startsWith('native:');
+        return {
+          ...f,
+          rule: isNative ? 'binary:native-symbol' : f.label,
+          ...(isNative && { symbol: f.label.slice('native:'.length) }),
+          severity: binaryFindingSeverity(f.label),
+        };
+      }),
+    };
+  }
+  return out;
 }

@@ -26675,6 +26675,38 @@ function annotationLevel(sev) {
   if (sev === "moderate") return "warning";
   return "notice";
 }
+function withSeverity(pkg) {
+  if (pkg.error) return pkg;
+  const out = { ...pkg, maxSeverity: packageMaxSeverity(pkg) };
+  if (pkg.securityFindings) {
+    const { old: oldF, new: newF, delta } = pkg.securityFindings;
+    const oldCount = countByLabel(oldF);
+    const newCount = countByLabel(newF);
+    out.securityFindings = {
+      ...pkg.securityFindings,
+      delta: delta.map((f2) => ({
+        ...f2,
+        rule: f2.label,
+        severity: effectivePatternSeverity(f2.label, oldCount, newCount)
+      }))
+    };
+  }
+  if (pkg.binaryFindings) {
+    out.binaryFindings = {
+      ...pkg.binaryFindings,
+      delta: pkg.binaryFindings.delta.map((f2) => {
+        const isNative = f2.label.startsWith("native:");
+        return {
+          ...f2,
+          rule: isNative ? "binary:native-symbol" : f2.label,
+          ...isNative && { symbol: f2.label.slice("native:".length) },
+          severity: binaryFindingSeverity(f2.label)
+        };
+      })
+    };
+  }
+  return out;
+}
 
 // src/github/annotations.ts
 var npmResolver = {
@@ -33514,7 +33546,26 @@ async function resolvePlatforms(explicit, progress) {
   }
   return [host];
 }
-function buildReport(input, lockfiles) {
+function buildReport(input, rawLockfiles) {
+  const lockfiles = rawLockfiles.map((lf) => ({ ...lf, packages: lf.packages.map(withSeverity) }));
+  const bySeverity = { critical: 0, high: 0, moderate: 0, low: 0 };
+  const findingsBySeverity = {
+    critical: 0,
+    high: 0,
+    moderate: 0,
+    low: 0
+  };
+  let maxSeverity = null;
+  for (const { packages } of lockfiles) {
+    for (const p2 of packages) {
+      for (const f2 of [...p2.securityFindings?.delta ?? [], ...p2.binaryFindings?.delta ?? []]) {
+        if (f2.severity) findingsBySeverity[f2.severity]++;
+      }
+      if (!p2.maxSeverity) continue;
+      bySeverity[p2.maxSeverity]++;
+      maxSeverity = higher(maxSeverity, p2.maxSeverity);
+    }
+  }
   const analyzed = lockfiles.reduce((s3, lf) => s3 + lf.packages.length, 0);
   const errors = lockfiles.reduce((s3, lf) => s3 + lf.packages.filter((p2) => p2.error).length, 0);
   const newSecurityFindings = lockfiles.reduce(
@@ -33583,6 +33634,9 @@ function buildReport(input, lockfiles) {
       publisherChanges,
       licenseChanges,
       provenanceRegressions,
+      maxSeverity,
+      bySeverity,
+      findingsBySeverity,
       ecosystems
     },
     lockfiles
