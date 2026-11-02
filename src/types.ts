@@ -87,6 +87,13 @@ export interface BinaryFinding {
   /** Dangerous symbol name, set for `native:<symbol>` findings. */
   symbol?: string;
   severity?: Severity;
+  /** Extracted strings and imports of the binary, relative to the artifacts path. Only with `artifacts-dir`. */
+  evidence?: BinaryEvidence;
+}
+
+export interface BinaryEvidence {
+  strings: string;
+  imports: string;
 }
 
 export interface SecurityFinding {

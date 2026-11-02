@@ -11,7 +11,7 @@ import {
   zipLinks,
 } from '../../utils/extract.js';
 import type { AnalysisOptions, EcosystemAnalyzer } from '../base.js';
-import { type BinaryScan, binaryFindingsDelta, scanBinary } from '../shared/binary-scan.js';
+import { type BinaryScan, binaryFindingsDelta, scanBinaries } from '../shared/binary-scan.js';
 import { diffFiles } from '../shared/diff.js';
 import { annotateHooks, detectPythonWheelHooks } from '../shared/install-hooks.js';
 import { compareProvenance } from '../shared/provenance-check.js';
@@ -62,9 +62,9 @@ async function scanArtifacts(
         links.push(...zipLinks(data));
         if (keep)
           await extractZipToDir(data, join(tmpDir, `${tag}_${artifact.sha256.slice(0, 8)}`));
-        const binaries = extractZipBinaries(data);
-        binaryScans = new Map(
-          [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)]),
+        binaryScans = await scanBinaries(
+          extractZipBinaries(data),
+          keep ? join(tmpDir, `${tag}_${artifact.sha256.slice(0, 8)}`) : undefined,
         );
       }
       return {

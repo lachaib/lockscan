@@ -1,6 +1,6 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import type { DiffReport } from 'lockdelta';
 import { getAnalyzer } from '../ecosystems/index.js';
 import { reconcileConfusionSignal } from '../ecosystems/shared/registry-check.js';
@@ -110,7 +110,12 @@ export async function analyze(
       });
     }
 
-    return buildReport(report, lockfileAnalyses);
+    return buildReport(
+      report,
+      options.artifactsDir
+        ? relativizeEvidence(lockfileAnalyses, options.artifactsDir)
+        : lockfileAnalyses,
+    );
   } finally {
     if (!keepArtifacts) await rm(tmpDir, { recursive: true, force: true });
   }
@@ -233,4 +238,30 @@ function buildReport(input: DiffReport, rawLockfiles: LockfileAnalysis[]): Secur
     },
     lockfiles,
   };
+}
+
+function relativizeEvidence(lockfiles: LockfileAnalysis[], root: string): LockfileAnalysis[] {
+  return lockfiles.map((lf) => ({
+    ...lf,
+    packages: lf.packages.map((p) =>
+      p.binaryFindings
+        ? {
+            ...p,
+            binaryFindings: {
+              delta: p.binaryFindings.delta.map(({ evidence, ...f }) =>
+                evidence
+                  ? {
+                      ...f,
+                      evidence: {
+                        strings: relative(root, evidence.strings),
+                        imports: relative(root, evidence.imports),
+                      },
+                    }
+                  : f,
+              ),
+            },
+          }
+        : p,
+    ),
+  }));
 }

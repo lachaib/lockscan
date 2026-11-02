@@ -4,7 +4,7 @@ import type { PackageAnalysis, SecurityFinding } from '../../types.js';
 import type { ArchiveLink, FileMap } from '../../utils/extract.js';
 import { extractTarball, extractTarballBinaries } from '../../utils/extract.js';
 import type { AnalysisOptions, EcosystemAnalyzer } from '../base.js';
-import { type BinaryScan, binaryFindingsDelta, scanBinary } from '../shared/binary-scan.js';
+import { type BinaryScan, binaryFindingsDelta, scanBinaries } from '../shared/binary-scan.js';
 import { diffFiles } from '../shared/diff.js';
 import { findingsDelta, linkFindings, scanPatterns } from '../shared/scan.js';
 
@@ -42,13 +42,15 @@ interface NpmArtifactScan {
   linkFindings: SecurityFinding[];
 }
 
-async function scanNpmArtifact(data: Buffer, destDir: string): Promise<NpmArtifactScan> {
+async function scanNpmArtifact(
+  data: Buffer,
+  destDir: string,
+  keep: boolean,
+): Promise<NpmArtifactScan> {
   const links: ArchiveLink[] = [];
   const files = await extractTarball(data, destDir, JS_EXTENSIONS, links);
   const binaries = await extractTarballBinaries(destDir);
-  const binaryScans = new Map(
-    [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)]),
-  );
+  const binaryScans = await scanBinaries(binaries, keep ? destDir : undefined);
   return { files, binaryScans, linkFindings: linkFindings(links) };
 }
 
@@ -79,7 +81,11 @@ export class JavaScriptAnalyzer implements EcosystemAnalyzer {
 
     const download = (version: string, slot: string) => (url: string) =>
       downloadNpmTarball(url).then((data) =>
-        scanNpmArtifact(data, join(options.tmpDir, `${safeName}_${version}_${slot}`)),
+        scanNpmArtifact(
+          data,
+          join(options.tmpDir, `${safeName}_${version}_${slot}`),
+          Boolean(options.keepArtifacts),
+        ),
       );
 
     if (change_type === 'added') {

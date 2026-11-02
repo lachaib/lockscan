@@ -1,3 +1,6 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, resolve, sep } from 'node:path';
+import type { BinaryEvidence } from '../../types.js';
 import { extractImportedSymbols } from './binary-formats.js';
 import { type CodeSignature, extractCodeSignature } from './binary-signature.js';
 
@@ -141,12 +144,15 @@ export interface BinaryScan {
   entropy: number;
   /** Embedded Developer ID / Authenticode signature, when present. */
   signature?: CodeSignature;
+  /** Absolute paths of the evidence files written for this binary (artifacts-dir only). */
+  evidence?: BinaryEvidence;
 }
 
 export interface BinaryFinding {
   file: string;
   label: string;
   detail: string;
+  evidence?: BinaryEvidence;
 }
 
 /** Extract runs of printable ASCII characters (≥ minLen) from a binary buffer. */
@@ -168,6 +174,86 @@ export function extractStrings(data: Buffer, minLen = 6): string[] {
     result.push(data.subarray(start).toString('ascii'));
   }
   return result;
+}
+
+/** Like `extractStrings`, but keeps each string's byte offset. */
+function extractStringsWithOffsets(data: Buffer, minLen = 6): Array<[number, string]> {
+  const result: Array<[number, string]> = [];
+  let start = -1;
+  for (let i = 0; i <= data.length; i++) {
+    const printable = i < data.length && data[i] >= 0x20 && data[i] < 0x7f;
+    if (printable) {
+      if (start === -1) start = i;
+    } else {
+      if (start !== -1 && i - start >= minLen) {
+        result.push([start, data.subarray(start, i).toString('ascii')]);
+      }
+      start = -1;
+    }
+  }
+  return result;
+}
+
+export const EVIDENCE_MAX_BYTES = 256 * 1024;
+
+function capLines(lines: Iterable<string>): string {
+  let size = 0;
+  const out: string[] = [];
+  for (const line of lines) {
+    size += line.length + 1;
+    if (size > EVIDENCE_MAX_BYTES) {
+      out.push('[truncated]');
+      break;
+    }
+    out.push(line);
+  }
+  return `${out.join('\n')}\n`;
+}
+
+/** A binary is worth inspecting when any of the scanners found something in it. */
+function hasSignal(scan: BinaryScan): boolean {
+  return (
+    scan.suspiciousStrings.length > 0 ||
+    Object.keys(scan.symbolCounts).length > 0 ||
+    scan.entropy >= HIGH_ENTROPY_THRESHOLD
+  );
+}
+
+/** Writes capped strings and imports files for a binary under `dir`, refusing names that escape it. */
+async function writeEvidence(
+  dir: string,
+  filename: string,
+  data: Buffer,
+): Promise<BinaryEvidence | undefined> {
+  const root = resolve(dir);
+  const base = resolve(root, filename);
+  if (!base.startsWith(root + sep)) return undefined;
+  const strings = `${base}.lockscan-strings.txt`;
+  const imports = `${base}.lockscan-imports.txt`;
+  await mkdir(dirname(base), { recursive: true });
+  await writeFile(
+    strings,
+    capLines(extractStringsWithOffsets(data).map(([offset, text]) => `${offset}: ${text}`)),
+  );
+  await writeFile(imports, capLines(new Set(extractImportedSymbols(data))));
+  return { strings, imports };
+}
+
+/** Scans every binary; with `evidenceDir`, also writes evidence files for those with a signal. */
+export async function scanBinaries(
+  binaries: Map<string, Buffer>,
+  evidenceDir?: string,
+): Promise<Map<string, BinaryScan>> {
+  const scans = new Map<string, BinaryScan>();
+  for (const [name, buf] of binaries) {
+    const scan = scanBinary(name, buf);
+    if (evidenceDir && hasSignal(scan)) {
+      const evidence = await writeEvidence(evidenceDir, name, buf);
+      if (evidence) scan.evidence = evidence;
+    }
+    scans.set(name, scan);
+  }
+  return scans;
 }
 
 export function shannonEntropy(data: Buffer): number {
@@ -279,6 +365,7 @@ export function binaryFindingsDelta(
 
   for (const [filename, newScan] of newScans) {
     const oldScan = pairOldScan(filename, oldScans, newScans);
+    const start = findings.length;
 
     const signatureFinding = signatureDelta(filename, oldScan?.signature, newScan.signature);
     if (signatureFinding) findings.push(signatureFinding);
@@ -325,6 +412,10 @@ export function binaryFindingsDelta(
           detail: text.length > 100 ? `${text.slice(0, 100)}…` : text,
         });
       }
+    }
+
+    if (newScan.evidence) {
+      for (let i = start; i < findings.length; i++) findings[i].evidence = newScan.evidence;
     }
   }
 
