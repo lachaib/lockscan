@@ -31899,9 +31899,16 @@ async function tagExists(owner, repo, tag) {
     return false;
   }
 }
-async function findTag(owner, repo, version, packageName) {
+function versionAliases(version) {
+  const parts = version.split(".");
+  if (!parts.every((p2) => /^\d+$/.test(p2))) return [];
+  if (parts.length === 2) return [`${version}.0`];
+  if (parts.length > 2 && parts[parts.length - 1] === "0") return [parts.slice(0, -1).join(".")];
+  return [];
+}
+function tagCandidates(version, packageName) {
   const baseName = packageName.replace(/^@[^/]+\//, "");
-  const candidates = [
+  const exact = [
     `v${version}`,
     version,
     `${baseName}-${version}`,
@@ -31909,6 +31916,11 @@ async function findTag(owner, repo, version, packageName) {
     `${baseName}-v${version}`,
     `${packageName}-${version}`
   ];
+  const aliased = versionAliases(version).flatMap((v2) => [`v${v2}`, v2, `${baseName}-${v2}`]);
+  return [.../* @__PURE__ */ new Set([...exact, ...aliased])];
+}
+async function findTag(owner, repo, version, packageName) {
+  const candidates = tagCandidates(version, packageName);
   for (const tag of candidates) {
     if (await tagExists(owner, repo, tag)) return tag;
   }
