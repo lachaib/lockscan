@@ -79,7 +79,7 @@ Every source file inside the downloaded artifact is scanned with a catalogue of 
 - **String extraction:** Runs of printable ASCII characters (≥ 6 chars) are extracted from the raw binary, mimicking `strings(1)`. These reveal URLs, IP addresses, file paths, and other artefacts that compiled code cannot hide.
 - **Dangerous native symbols:** The extracted strings are matched against a list of libc / Windows API symbols (socket, connect, execve, system, popen, dlopen, CreateProcessA, setuid, mprotect, …). A library that legitimately uses these will already have them in the old version; a *new* or *spiking* symbol count is the signal.
 - **Shannon entropy:** A high-entropy region (threshold 7.2 bits/byte) indicates packed or encrypted data — the classic signature of a payload that decrypts itself at runtime.
-- **Suspicious embedded strings:** URLs, IP addresses, `/etc/passwd`-style paths, `/tmp/…` paths, and long base64-like blobs are flagged.
+- **Suspicious embedded strings:** URLs, IP addresses, `/etc/passwd`-style paths, `/tmp/…` paths, and long base64 blobs are flagged (low-diversity data tables and pure-hex runs, which merely look like base64, are ignored). Binaries are paired across versions by name, ignoring a leading build hash such as `<hex>__mypyc`.
 
 **Delta analysis:** The tool compares old and new binary scans so that a library that legitimately imports `socket` does not generate noise — only *changes* between versions are reported.
 
