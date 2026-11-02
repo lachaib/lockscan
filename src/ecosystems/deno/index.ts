@@ -13,7 +13,7 @@ import {
   fetchNpmVersion,
   getArtifactInfo,
 } from '../javascript/npm.js';
-import { type BinaryScan, binaryFindingsDelta, scanBinary } from '../shared/binary-scan.js';
+import { type BinaryScan, binaryFindingsDelta, scanBinaries } from '../shared/binary-scan.js';
 import { diffFiles } from '../shared/diff.js';
 import { annotateHooks, detectNpmHooks } from '../shared/install-hooks.js';
 import { compareProvenance } from '../shared/provenance-check.js';
@@ -35,13 +35,15 @@ interface NpmArtifactScan {
   linkFindings: SecurityFinding[];
 }
 
-async function scanNpmArtifact(data: Buffer, destDir: string): Promise<NpmArtifactScan> {
+async function scanNpmArtifact(
+  data: Buffer,
+  destDir: string,
+  keep: boolean,
+): Promise<NpmArtifactScan> {
   const links: ArchiveLink[] = [];
   const files = await extractTarball(data, destDir, NPM_EXTENSIONS, links);
   const binaries = await extractTarballBinaries(destDir);
-  const binaryScans = new Map(
-    [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)]),
-  );
+  const binaryScans = await scanBinaries(binaries, keep ? destDir : undefined);
   return { files, binaryScans, linkFindings: linkFindings(links) };
 }
 
@@ -106,7 +108,11 @@ export class DenoAnalyzer implements EcosystemAnalyzer {
 
     const download = (version: string, slot: string) => (url: string) =>
       downloadNpmTarball(url).then((data) =>
-        scanNpmArtifact(data, join(options.tmpDir, `deno_npm_${safeName}_${version}_${slot}`)),
+        scanNpmArtifact(
+          data,
+          join(options.tmpDir, `deno_npm_${safeName}_${version}_${slot}`),
+          Boolean(options.keepArtifacts),
+        ),
       );
 
     if (changeType === 'removed') {

@@ -2080,9 +2080,9 @@ var require_dispatcher_base = __commonJS({
       }
       close(callback) {
         if (callback === void 0) {
-          return new Promise((resolve3, reject) => {
+          return new Promise((resolve4, reject) => {
             this.close((err, data) => {
-              return err ? reject(err) : resolve3(data);
+              return err ? reject(err) : resolve4(data);
             });
           });
         }
@@ -2120,12 +2120,12 @@ var require_dispatcher_base = __commonJS({
           err = null;
         }
         if (callback === void 0) {
-          return new Promise((resolve3, reject) => {
+          return new Promise((resolve4, reject) => {
             this.destroy(err, (err2, data) => {
               return err2 ? (
                 /* istanbul ignore next: should never error */
                 reject(err2)
-              ) : resolve3(data);
+              ) : resolve4(data);
             });
           });
         }
@@ -4392,8 +4392,8 @@ var require_util2 = __commonJS({
     function createDeferredPromise() {
       let res;
       let rej;
-      const promise = new Promise((resolve3, reject) => {
-        res = resolve3;
+      const promise = new Promise((resolve4, reject) => {
+        res = resolve4;
         rej = reject;
       });
       return { promise, resolve: res, reject: rej };
@@ -6572,12 +6572,12 @@ upgrade: ${upgrade}\r
           cb();
         }
       }
-      const waitForDrain = () => new Promise((resolve3, reject) => {
+      const waitForDrain = () => new Promise((resolve4, reject) => {
         assert(callback === null);
         if (socket[kError]) {
           reject(socket[kError]);
         } else {
-          callback = resolve3;
+          callback = resolve4;
         }
       });
       socket.on("close", onDrain).on("drain", onDrain);
@@ -7214,12 +7214,12 @@ var require_client_h2 = __commonJS({
           cb();
         }
       }
-      const waitForDrain = () => new Promise((resolve3, reject) => {
+      const waitForDrain = () => new Promise((resolve4, reject) => {
         assert(callback === null);
         if (socket[kError]) {
           reject(socket[kError]);
         } else {
-          callback = resolve3;
+          callback = resolve4;
         }
       });
       h2stream.on("close", onDrain).on("drain", onDrain);
@@ -7697,16 +7697,16 @@ var require_client = __commonJS({
         return this[kNeedDrain] < 2;
       }
       async [kClose]() {
-        return new Promise((resolve3) => {
+        return new Promise((resolve4) => {
           if (this[kSize]) {
-            this[kClosedResolve] = resolve3;
+            this[kClosedResolve] = resolve4;
           } else {
-            resolve3(null);
+            resolve4(null);
           }
         });
       }
       async [kDestroy](err) {
-        return new Promise((resolve3) => {
+        return new Promise((resolve4) => {
           const requests = this[kQueue].splice(this[kPendingIdx]);
           for (let i = 0; i < requests.length; i++) {
             const request2 = requests[i];
@@ -7717,7 +7717,7 @@ var require_client = __commonJS({
               this[kClosedResolve]();
               this[kClosedResolve] = null;
             }
-            resolve3(null);
+            resolve4(null);
           };
           if (this[kHTTPContext]) {
             this[kHTTPContext].destroy(err, callback);
@@ -7768,7 +7768,7 @@ var require_client = __commonJS({
         });
       }
       try {
-        const socket = await new Promise((resolve3, reject) => {
+        const socket = await new Promise((resolve4, reject) => {
           client[kConnector]({
             host,
             hostname,
@@ -7780,7 +7780,7 @@ var require_client = __commonJS({
             if (err) {
               reject(err);
             } else {
-              resolve3(socket2);
+              resolve4(socket2);
             }
           });
         });
@@ -8117,8 +8117,8 @@ var require_pool_base = __commonJS({
         if (this[kQueue].isEmpty()) {
           await Promise.all(this[kClients].map((c) => c.close()));
         } else {
-          await new Promise((resolve3) => {
-            this[kClosedResolve] = resolve3;
+          await new Promise((resolve4) => {
+            this[kClosedResolve] = resolve4;
           });
         }
       }
@@ -9333,7 +9333,7 @@ var require_readable = __commonJS({
         if (this._readableState.closeEmitted) {
           return null;
         }
-        return await new Promise((resolve3, reject) => {
+        return await new Promise((resolve4, reject) => {
           if (this[kContentLength] > limit) {
             this.destroy(new AbortError());
           }
@@ -9346,7 +9346,7 @@ var require_readable = __commonJS({
             if (signal?.aborted) {
               reject(signal.reason ?? new AbortError());
             } else {
-              resolve3(null);
+              resolve4(null);
             }
           }).on("error", noop3).on("data", function(chunk) {
             limit -= chunk.length;
@@ -9365,7 +9365,7 @@ var require_readable = __commonJS({
     }
     async function consume(stream, type) {
       assert(!stream[kConsume]);
-      return new Promise((resolve3, reject) => {
+      return new Promise((resolve4, reject) => {
         if (isUnusable(stream)) {
           const rState = stream._readableState;
           if (rState.destroyed && rState.closeEmitted === false) {
@@ -9382,7 +9382,7 @@ var require_readable = __commonJS({
             stream[kConsume] = {
               type,
               stream,
-              resolve: resolve3,
+              resolve: resolve4,
               reject,
               length: 0,
               body: []
@@ -9452,18 +9452,18 @@ var require_readable = __commonJS({
       return buffer;
     }
     function consumeEnd(consume2) {
-      const { type, body, resolve: resolve3, stream, length } = consume2;
+      const { type, body, resolve: resolve4, stream, length } = consume2;
       try {
         if (type === "text") {
-          resolve3(chunksDecode(body, length));
+          resolve4(chunksDecode(body, length));
         } else if (type === "json") {
-          resolve3(JSON.parse(chunksDecode(body, length)));
+          resolve4(JSON.parse(chunksDecode(body, length)));
         } else if (type === "arrayBuffer") {
-          resolve3(chunksConcat(body, length).buffer);
+          resolve4(chunksConcat(body, length).buffer);
         } else if (type === "blob") {
-          resolve3(new Blob(body, { type: stream[kContentType] }));
+          resolve4(new Blob(body, { type: stream[kContentType] }));
         } else if (type === "bytes") {
-          resolve3(chunksConcat(body, length));
+          resolve4(chunksConcat(body, length));
         }
         consumeFinish(consume2);
       } catch (err) {
@@ -9721,9 +9721,9 @@ var require_api_request = __commonJS({
     };
     function request2(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve3, reject) => {
+        return new Promise((resolve4, reject) => {
           request2.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve3(data);
+            return err ? reject(err) : resolve4(data);
           });
         });
       }
@@ -9947,9 +9947,9 @@ var require_api_stream = __commonJS({
     };
     function stream(opts, factory, callback) {
       if (callback === void 0) {
-        return new Promise((resolve3, reject) => {
+        return new Promise((resolve4, reject) => {
           stream.call(this, opts, factory, (err, data) => {
-            return err ? reject(err) : resolve3(data);
+            return err ? reject(err) : resolve4(data);
           });
         });
       }
@@ -10234,9 +10234,9 @@ var require_api_upgrade = __commonJS({
     };
     function upgrade(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve3, reject) => {
+        return new Promise((resolve4, reject) => {
           upgrade.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve3(data);
+            return err ? reject(err) : resolve4(data);
           });
         });
       }
@@ -10328,9 +10328,9 @@ var require_api_connect = __commonJS({
     };
     function connect(opts, callback) {
       if (callback === void 0) {
-        return new Promise((resolve3, reject) => {
+        return new Promise((resolve4, reject) => {
           connect.call(this, opts, (err, data) => {
-            return err ? reject(err) : resolve3(data);
+            return err ? reject(err) : resolve4(data);
           });
         });
       }
@@ -14192,7 +14192,7 @@ var require_fetch = __commonJS({
       function dispatch({ body }) {
         const url = requestCurrentURL(request2);
         const agent = fetchParams.controller.dispatcher;
-        return new Promise((resolve3, reject) => agent.dispatch(
+        return new Promise((resolve4, reject) => agent.dispatch(
           {
             path: url.pathname + url.search,
             origin: url.origin,
@@ -14268,7 +14268,7 @@ var require_fetch = __commonJS({
                 }
               }
               const onError = this.onError.bind(this);
-              resolve3({
+              resolve4({
                 status,
                 statusText,
                 headersList,
@@ -14314,7 +14314,7 @@ var require_fetch = __commonJS({
               for (let i = 0; i < rawHeaders.length; i += 2) {
                 headersList.append(bufferToLowerCasedHeaderName(rawHeaders[i]), rawHeaders[i + 1].toString("latin1"), true);
               }
-              resolve3({
+              resolve4({
                 status,
                 statusText: STATUS_CODES[status],
                 headersList,
@@ -17990,8 +17990,8 @@ var require_util8 = __commonJS({
       return true;
     }
     function delay(ms2) {
-      return new Promise((resolve3) => {
-        setTimeout(resolve3, ms2).unref();
+      return new Promise((resolve4) => {
+        setTimeout(resolve4, ms2).unref();
       });
     }
     module2.exports = {
@@ -18795,11 +18795,11 @@ var require_lib = __commonJS({
     })();
     var __awaiter3 = exports2 && exports2.__awaiter || function(thisArg, _arguments, P2, generator) {
       function adopt(value) {
-        return value instanceof P2 ? value : new P2(function(resolve3) {
-          resolve3(value);
+        return value instanceof P2 ? value : new P2(function(resolve4) {
+          resolve4(value);
         });
       }
-      return new (P2 || (P2 = Promise))(function(resolve3, reject) {
+      return new (P2 || (P2 = Promise))(function(resolve4, reject) {
         function fulfilled(value) {
           try {
             step(generator.next(value));
@@ -18815,7 +18815,7 @@ var require_lib = __commonJS({
           }
         }
         function step(result) {
-          result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
+          result.done ? resolve4(result.value) : adopt(result.value).then(fulfilled, rejected);
         }
         step((generator = generator.apply(thisArg, _arguments || [])).next());
       });
@@ -18902,26 +18902,26 @@ var require_lib = __commonJS({
       }
       readBody() {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve3) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve4) => __awaiter3(this, void 0, void 0, function* () {
             let output = Buffer.alloc(0);
             this.message.on("data", (chunk) => {
               output = Buffer.concat([output, chunk]);
             });
             this.message.on("end", () => {
-              resolve3(output.toString());
+              resolve4(output.toString());
             });
           }));
         });
       }
       readBodyBuffer() {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve3) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve4) => __awaiter3(this, void 0, void 0, function* () {
             const chunks = [];
             this.message.on("data", (chunk) => {
               chunks.push(chunk);
             });
             this.message.on("end", () => {
-              resolve3(Buffer.concat(chunks));
+              resolve4(Buffer.concat(chunks));
             });
           }));
         });
@@ -19129,14 +19129,14 @@ var require_lib = __commonJS({
        */
       requestRaw(info, data) {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve3, reject) => {
+          return new Promise((resolve4, reject) => {
             function callbackForResult(err, res) {
               if (err) {
                 reject(err);
               } else if (!res) {
                 reject(new Error("Unknown error"));
               } else {
-                resolve3(res);
+                resolve4(res);
               }
             }
             this.requestRawWithCallback(info, data, callbackForResult);
@@ -19380,12 +19380,12 @@ var require_lib = __commonJS({
         return __awaiter3(this, void 0, void 0, function* () {
           retryNumber = Math.min(ExponentialBackoffCeiling, retryNumber);
           const ms2 = ExponentialBackoffTimeSlice * Math.pow(2, retryNumber);
-          return new Promise((resolve3) => setTimeout(() => resolve3(), ms2));
+          return new Promise((resolve4) => setTimeout(() => resolve4(), ms2));
         });
       }
       _processResponse(res, options) {
         return __awaiter3(this, void 0, void 0, function* () {
-          return new Promise((resolve3, reject) => __awaiter3(this, void 0, void 0, function* () {
+          return new Promise((resolve4, reject) => __awaiter3(this, void 0, void 0, function* () {
             const statusCode = res.message.statusCode || 0;
             const response = {
               statusCode,
@@ -19393,7 +19393,7 @@ var require_lib = __commonJS({
               headers: {}
             };
             if (statusCode === HttpCodes2.NotFound) {
-              resolve3(response);
+              resolve4(response);
             }
             function dateTimeDeserializer(key, value) {
               if (typeof value === "string") {
@@ -19432,7 +19432,7 @@ var require_lib = __commonJS({
               err.result = response.result;
               reject(err);
             } else {
-              resolve3(response);
+              resolve4(response);
             }
           }));
         });
@@ -21524,8 +21524,8 @@ var require_adm_zip = __commonJS({
         return null;
       }
       function fixPath(zipPath) {
-        const { join: join9, normalize, sep: sep3 } = pth.posix;
-        return join9(pth.isAbsolute(zipPath) ? "/" : ".", normalize(sep3 + zipPath.split("\\").join(sep3) + sep3));
+        const { join: join9, normalize, sep: sep4 } = pth.posix;
+        return join9(pth.isAbsolute(zipPath) ? "/" : ".", normalize(sep4 + zipPath.split("\\").join(sep4) + sep4));
       }
       function filenameFilter(filterfn) {
         if (filterfn instanceof RegExp) {
@@ -21920,10 +21920,10 @@ var require_adm_zip = __commonJS({
          * @param {function|string} [props.namefix] - optional function to help fix filename
          */
         addLocalFolderPromise: function(localPath2, props) {
-          return new Promise((resolve3, reject) => {
+          return new Promise((resolve4, reject) => {
             this.addLocalFolderAsync2(Object.assign({ localPath: localPath2 }, props), (err, done) => {
               if (err) reject(err);
-              if (done) resolve3(this);
+              if (done) resolve4(this);
             });
           });
         },
@@ -22110,12 +22110,12 @@ var require_adm_zip = __commonJS({
           keepOriginalPermission = get_Bool(false, keepOriginalPermission);
           overwrite = get_Bool(false, overwrite);
           if (!callback) {
-            return new Promise((resolve3, reject) => {
+            return new Promise((resolve4, reject) => {
               this.extractAllToAsync(targetPath, overwrite, keepOriginalPermission, function(err) {
                 if (err) {
                   reject(err);
                 } else {
-                  resolve3(this);
+                  resolve4(this);
                 }
               });
             });
@@ -22213,11 +22213,11 @@ var require_adm_zip = __commonJS({
                  */
         writeZipPromise: function(targetFileName, props) {
           const { overwrite, perm } = Object.assign({ overwrite: true }, props);
-          return new Promise((resolve3, reject) => {
+          return new Promise((resolve4, reject) => {
             if (!targetFileName && opts.filename) targetFileName = opts.filename;
             if (!targetFileName) reject("ADM-ZIP: ZIP File Name Missing");
             this.toBufferPromise().then((zipData) => {
-              const ret = (done) => done ? resolve3(done) : reject("ADM-ZIP: Wasn't able to write zip file");
+              const ret = (done) => done ? resolve4(done) : reject("ADM-ZIP: Wasn't able to write zip file");
               filetools.writeFileToAsync(targetFileName, zipData, overwrite, perm, ret);
             }, reject);
           });
@@ -22226,8 +22226,8 @@ var require_adm_zip = __commonJS({
          * @returns {Promise<Buffer>} A promise to the Buffer.
          */
         toBufferPromise: function() {
-          return new Promise((resolve3, reject) => {
-            _zip.toAsyncBuffer(resolve3, reject);
+          return new Promise((resolve4, reject) => {
+            _zip.toAsyncBuffer(resolve4, reject);
           });
         },
         /**
@@ -22253,7 +22253,7 @@ var require_adm_zip = __commonJS({
 
 // src/action.ts
 var import_node_fs8 = require("fs");
-var import_node_path18 = require("path");
+var import_node_path19 = require("path");
 
 // node_modules/.pnpm/@actions+core@3.0.1/node_modules/@actions/core/lib/command.js
 var os = __toESM(require("os"), 1);
@@ -22417,11 +22417,11 @@ var import_os = require("os");
 var import_fs = require("fs");
 var __awaiter = function(thisArg, _arguments, P2, generator) {
   function adopt(value) {
-    return value instanceof P2 ? value : new P2(function(resolve3) {
-      resolve3(value);
+    return value instanceof P2 ? value : new P2(function(resolve4) {
+      resolve4(value);
     });
   }
-  return new (P2 || (P2 = Promise))(function(resolve3, reject) {
+  return new (P2 || (P2 = Promise))(function(resolve4, reject) {
     function fulfilled(value) {
       try {
         step(generator.next(value));
@@ -22437,7 +22437,7 @@ var __awaiter = function(thisArg, _arguments, P2, generator) {
       }
     }
     function step(result) {
-      result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
+      result.done ? resolve4(result.value) : adopt(result.value).then(fulfilled, rejected);
     }
     step((generator = generator.apply(thisArg, _arguments || [])).next());
   });
@@ -22814,11 +22814,11 @@ var httpClient = __toESM(require_lib(), 1);
 var import_undici2 = __toESM(require_undici(), 1);
 var __awaiter2 = function(thisArg, _arguments, P2, generator) {
   function adopt(value) {
-    return value instanceof P2 ? value : new P2(function(resolve3) {
-      resolve3(value);
+    return value instanceof P2 ? value : new P2(function(resolve4) {
+      resolve4(value);
     });
   }
-  return new (P2 || (P2 = Promise))(function(resolve3, reject) {
+  return new (P2 || (P2 = Promise))(function(resolve4, reject) {
     function fulfilled(value) {
       try {
         step(generator.next(value));
@@ -22834,7 +22834,7 @@ var __awaiter2 = function(thisArg, _arguments, P2, generator) {
       }
     }
     function step(result) {
-      result.done ? resolve3(result.value) : adopt(result.value).then(fulfilled, rejected);
+      result.done ? resolve4(result.value) : adopt(result.value).then(fulfilled, rejected);
     }
     step((generator = generator.apply(thisArg, _arguments || [])).next());
   });
@@ -27333,12 +27333,12 @@ function generateSarif(report, workspace = process.cwd()) {
 }
 
 // src/core/analyzer.ts
-var import_promises4 = require("fs/promises");
+var import_promises5 = require("fs/promises");
 var import_node_os = require("os");
-var import_node_path16 = require("path");
+var import_node_path17 = require("path");
 
 // src/ecosystems/deno/index.ts
-var import_node_path12 = require("path");
+var import_node_path13 = require("path");
 
 // src/utils/extract.ts
 var import_promises2 = require("fs/promises");
@@ -30765,6 +30765,10 @@ function computeMetadataDelta(oldMeta, newMeta) {
   };
 }
 
+// src/ecosystems/shared/binary-scan.ts
+var import_promises3 = require("fs/promises");
+var import_node_path12 = require("path");
+
 // src/ecosystems/shared/binary-signature.ts
 var import_node_crypto2 = require("crypto");
 function extractCodeSignature(data) {
@@ -31075,6 +31079,66 @@ function extractStrings(data, minLen = 6) {
   }
   return result;
 }
+function extractStringsWithOffsets(data, minLen = 6) {
+  const result = [];
+  let start = -1;
+  for (let i = 0; i <= data.length; i++) {
+    const printable = i < data.length && data[i] >= 32 && data[i] < 127;
+    if (printable) {
+      if (start === -1) start = i;
+    } else {
+      if (start !== -1 && i - start >= minLen) {
+        result.push([start, data.subarray(start, i).toString("ascii")]);
+      }
+      start = -1;
+    }
+  }
+  return result;
+}
+var EVIDENCE_MAX_BYTES = 256 * 1024;
+function capLines(lines) {
+  let size = 0;
+  const out = [];
+  for (const line of lines) {
+    size += line.length + 1;
+    if (size > EVIDENCE_MAX_BYTES) {
+      out.push("[truncated]");
+      break;
+    }
+    out.push(line);
+  }
+  return `${out.join("\n")}
+`;
+}
+function hasSignal(scan) {
+  return scan.suspiciousStrings.length > 0 || Object.keys(scan.symbolCounts).length > 0 || scan.entropy >= HIGH_ENTROPY_THRESHOLD;
+}
+async function writeEvidence(dir, filename, data) {
+  const root = (0, import_node_path12.resolve)(dir);
+  const base = (0, import_node_path12.resolve)(root, filename);
+  if (!base.startsWith(root + import_node_path12.sep)) return void 0;
+  const strings = `${base}.lockscan-strings.txt`;
+  const imports = `${base}.lockscan-imports.txt`;
+  await (0, import_promises3.mkdir)((0, import_node_path12.dirname)(base), { recursive: true });
+  await (0, import_promises3.writeFile)(
+    strings,
+    capLines(extractStringsWithOffsets(data).map(([offset, text]) => `${offset}: ${text}`))
+  );
+  await (0, import_promises3.writeFile)(imports, capLines(new Set(extractImportedSymbols(data))));
+  return { strings, imports };
+}
+async function scanBinaries(binaries, evidenceDir) {
+  const scans = /* @__PURE__ */ new Map();
+  for (const [name, buf] of binaries) {
+    const scan = scanBinary(name, buf);
+    if (evidenceDir && hasSignal(scan)) {
+      const evidence = await writeEvidence(evidenceDir, name, buf);
+      if (evidence) scan.evidence = evidence;
+    }
+    scans.set(name, scan);
+  }
+  return scans;
+}
 function shannonEntropy(data) {
   if (data.length === 0) return 0;
   const freq = new Uint32Array(256);
@@ -31154,6 +31218,7 @@ function binaryFindingsDelta(oldScans, newScans) {
   const findings = [];
   for (const [filename, newScan] of newScans) {
     const oldScan = pairOldScan(filename, oldScans, newScans);
+    const start = findings.length;
     const signatureFinding = signatureDelta(filename, oldScan?.signature, newScan.signature);
     if (signatureFinding) findings.push(signatureFinding);
     if (newScan.entropy >= HIGH_ENTROPY_THRESHOLD) {
@@ -31190,6 +31255,9 @@ function binaryFindingsDelta(oldScans, newScans) {
           detail: text.length > 100 ? `${text.slice(0, 100)}\u2026` : text
         });
       }
+    }
+    if (newScan.evidence) {
+      for (let i = start; i < findings.length; i++) findings[i].evidence = newScan.evidence;
     }
   }
   return findings;
@@ -32182,13 +32250,11 @@ var NPM_EXTENSIONS = /* @__PURE__ */ new Set([".js", ".mjs", ".cjs"]);
 var JSR_EXTENSIONS = /* @__PURE__ */ new Set([".ts", ".tsx", ".js", ".mjs", ".jsx"]);
 
 // src/ecosystems/deno/index.ts
-async function scanNpmArtifact(data, destDir) {
+async function scanNpmArtifact(data, destDir, keep) {
   const links = [];
   const files = await extractTarball(data, destDir, NPM_EXTENSIONS, links);
   const binaries = await extractTarballBinaries(destDir);
-  const binaryScans = new Map(
-    [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)])
-  );
+  const binaryScans = await scanBinaries(binaries, keep ? destDir : void 0);
   return { files, binaryScans, linkFindings: linkFindings(links) };
 }
 var DenoAnalyzer = class {
@@ -32231,7 +32297,11 @@ var DenoAnalyzer = class {
   async analyzeNpm(base, name, changeType, oldVersion, newVersion, options, registryCheck) {
     const safeName = name.replace(/\//g, "__");
     const download = (version, slot) => (url) => downloadNpmTarball(url).then(
-      (data) => scanNpmArtifact(data, (0, import_node_path12.join)(options.tmpDir, `deno_npm_${safeName}_${version}_${slot}`))
+      (data) => scanNpmArtifact(
+        data,
+        (0, import_node_path13.join)(options.tmpDir, `deno_npm_${safeName}_${version}_${slot}`),
+        Boolean(options.keepArtifacts)
+      )
     );
     if (changeType === "removed") {
       return {
@@ -32342,7 +32412,7 @@ var DenoAnalyzer = class {
       return {
         files: await extractTarball(
           data,
-          (0, import_node_path12.join)(options.tmpDir, `deno_jsr_${safeName}_${version}_${slot}`),
+          (0, import_node_path13.join)(options.tmpDir, `deno_jsr_${safeName}_${version}_${slot}`),
           JSR_EXTENSIONS,
           links
         ),
@@ -32445,7 +32515,7 @@ var DenoAnalyzer = class {
 };
 
 // src/ecosystems/javascript/index.ts
-var import_node_path13 = require("path");
+var import_node_path14 = require("path");
 var NATIVE_BUILD_FILES = /* @__PURE__ */ new Set(["binding.gyp", "binding.gyp.json"]);
 function checkNpmNativeBuild(oldFiles, newFiles) {
   for (const name of NATIVE_BUILD_FILES) {
@@ -32456,13 +32526,11 @@ function checkNpmNativeBuild(oldFiles, newFiles) {
   }
   return false;
 }
-async function scanNpmArtifact2(data, destDir) {
+async function scanNpmArtifact2(data, destDir, keep) {
   const links = [];
   const files = await extractTarball(data, destDir, JS_EXTENSIONS, links);
   const binaries = await extractTarballBinaries(destDir);
-  const binaryScans = new Map(
-    [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)])
-  );
+  const binaryScans = await scanBinaries(binaries, keep ? destDir : void 0);
   return { files, binaryScans, linkFindings: linkFindings(links) };
 }
 var JavaScriptAnalyzer = class {
@@ -32487,7 +32555,11 @@ var JavaScriptAnalyzer = class {
       };
     }
     const download = (version, slot) => (url) => downloadNpmTarball(url).then(
-      (data) => scanNpmArtifact2(data, (0, import_node_path13.join)(options.tmpDir, `${safeName}_${version}_${slot}`))
+      (data) => scanNpmArtifact2(
+        data,
+        (0, import_node_path14.join)(options.tmpDir, `${safeName}_${version}_${slot}`),
+        Boolean(options.keepArtifacts)
+      )
     );
     if (change_type === "added") {
       const newMeta2 = await fetchNpmVersion(name, new_version);
@@ -32871,7 +32943,7 @@ var PhpAnalyzer = class {
 };
 
 // src/ecosystems/python/index.ts
-var import_node_path14 = require("path");
+var import_node_path15 = require("path");
 
 // src/ecosystems/python/patterns.ts
 var DANGEROUS_PATTERNS4 = [
@@ -33116,7 +33188,7 @@ async function scanArtifacts(artifacts, tmpDir, tag, keep) {
       if (artifact.isSdist) {
         files = await extractTarball(
           data,
-          (0, import_node_path14.join)(tmpDir, `${tag}_${artifact.sha256.slice(0, 8)}`),
+          (0, import_node_path15.join)(tmpDir, `${tag}_${artifact.sha256.slice(0, 8)}`),
           PY_EXTENSIONS,
           links
         );
@@ -33125,10 +33197,10 @@ async function scanArtifacts(artifacts, tmpDir, tag, keep) {
         files = extractZip(data, PY_EXTENSIONS);
         links.push(...zipLinks(data));
         if (keep)
-          await extractZipToDir(data, (0, import_node_path14.join)(tmpDir, `${tag}_${artifact.sha256.slice(0, 8)}`));
-        const binaries = extractZipBinaries(data);
-        binaryScans = new Map(
-          [...binaries.entries()].map(([name, buf]) => [name, scanBinary(name, buf)])
+          await extractZipToDir(data, (0, import_node_path15.join)(tmpDir, `${tag}_${artifact.sha256.slice(0, 8)}`));
+        binaryScans = await scanBinaries(
+          extractZipBinaries(data),
+          keep ? (0, import_node_path15.join)(tmpDir, `${tag}_${artifact.sha256.slice(0, 8)}`) : void 0
         );
       }
       return {
@@ -33436,8 +33508,8 @@ async function queryOsv(packages) {
 }
 
 // src/platforms.ts
-var import_promises3 = require("fs/promises");
-var import_node_path15 = require("path");
+var import_promises4 = require("fs/promises");
+var import_node_path16 = require("path");
 function parsePlatform(spec) {
   const parts = spec.trim().split("/");
   if (parts.length < 2) {
@@ -33461,13 +33533,13 @@ function detectHostPlatform() {
 }
 async function detectPythonVersion(dir) {
   try {
-    const toml = await (0, import_promises3.readFile)((0, import_node_path15.join)(dir, "pyproject.toml"), "utf8");
+    const toml = await (0, import_promises4.readFile)((0, import_node_path16.join)(dir, "pyproject.toml"), "utf8");
     const m2 = toml.match(/requires-python\s*=\s*["'][><=!~ ]*(\d+)\.(\d+)/);
     if (m2) return `${m2[1]}.${m2[2]}`;
   } catch {
   }
   try {
-    const pv = await (0, import_promises3.readFile)((0, import_node_path15.join)(dir, ".python-version"), "utf8");
+    const pv = await (0, import_promises4.readFile)((0, import_node_path16.join)(dir, ".python-version"), "utf8");
     const m2 = pv.trim().match(/^(\d+)\.(\d+)/);
     if (m2) return `${m2[1]}.${m2[2]}`;
   } catch {
@@ -33488,7 +33560,7 @@ async function analyze(report, options) {
   progress(`Platforms: ${platforms.map(platformLabel).join(", ")}
 `);
   const keepArtifacts = Boolean(options.artifactsDir);
-  const tmpDir = options.artifactsDir ?? await (0, import_promises4.mkdtemp)((0, import_node_path16.join)((0, import_node_os.tmpdir)(), "lockscan-"));
+  const tmpDir = options.artifactsDir ?? await (0, import_promises5.mkdtemp)((0, import_node_path17.join)((0, import_node_os.tmpdir)(), "lockscan-"));
   try {
     const lockfileAnalyses = [];
     for (const lf of report.lockfiles) {
@@ -33527,7 +33599,7 @@ Analyzing ${lf.path ?? "lockfile"} (${lf.ecosystem}): ${changes.length} change(s
         try {
           const rawAnalysis = await analyzer.analyzeChange(change, {
             platforms,
-            tmpDir: (0, import_node_path16.join)(tmpDir, lf.ecosystem),
+            tmpDir: (0, import_node_path17.join)(tmpDir, lf.ecosystem),
             keepArtifacts
           });
           const analysis = rawAnalysis.registryCheck ? {
@@ -33560,9 +33632,12 @@ Analyzing ${lf.path ?? "lockfile"} (${lf.ecosystem}): ${changes.length} change(s
         packages
       });
     }
-    return buildReport(report, lockfileAnalyses);
+    return buildReport(
+      report,
+      options.artifactsDir ? relativizeEvidence(lockfileAnalyses, options.artifactsDir) : lockfileAnalyses
+    );
   } finally {
-    if (!keepArtifacts) await (0, import_promises4.rm)(tmpDir, { recursive: true, force: true });
+    if (!keepArtifacts) await (0, import_promises5.rm)(tmpDir, { recursive: true, force: true });
   }
 }
 async function resolvePlatforms(explicit, progress) {
@@ -33672,6 +33747,27 @@ function buildReport(input, rawLockfiles) {
     lockfiles
   };
 }
+function relativizeEvidence(lockfiles, root) {
+  return lockfiles.map((lf) => ({
+    ...lf,
+    packages: lf.packages.map(
+      (p2) => p2.binaryFindings ? {
+        ...p2,
+        binaryFindings: {
+          delta: p2.binaryFindings.delta.map(
+            ({ evidence, ...f2 }) => evidence ? {
+              ...f2,
+              evidence: {
+                strings: (0, import_node_path17.relative)(root, evidence.strings),
+                imports: (0, import_node_path17.relative)(root, evidence.imports)
+              }
+            } : f2
+          )
+        }
+      } : p2
+    )
+  }));
+}
 
 // src/index.ts
 async function analyze2(report, options = {}) {
@@ -33679,12 +33775,12 @@ async function analyze2(report, options = {}) {
 }
 
 // src/utils/artifacts-dir.ts
-var import_promises5 = require("fs/promises");
-var import_node_path17 = require("path");
+var import_promises6 = require("fs/promises");
+var import_node_path18 = require("path");
 async function prepareArtifactsDir(dir, base) {
-  const parent = (0, import_node_path17.resolve)(base, dir);
-  await (0, import_promises5.mkdir)(parent, { recursive: true });
-  return (0, import_promises5.mkdtemp)((0, import_node_path17.join)(parent, "lockscan-"));
+  const parent = (0, import_node_path18.resolve)(base, dir);
+  await (0, import_promises6.mkdir)(parent, { recursive: true });
+  return (0, import_promises6.mkdtemp)((0, import_node_path18.join)(parent, "lockscan-"));
 }
 
 // src/action.ts
@@ -33717,7 +33813,7 @@ async function prepareArtifactsDir(dir, base) {
     setOutput("report", reportJson);
     const jsonFile = getInput("json-to-file");
     if (jsonFile) {
-      (0, import_node_fs8.mkdirSync)((0, import_node_path18.dirname)(jsonFile), { recursive: true });
+      (0, import_node_fs8.mkdirSync)((0, import_node_path19.dirname)(jsonFile), { recursive: true });
       (0, import_node_fs8.writeFileSync)(jsonFile, reportJson);
     }
     const maxSev = reportMaxSeverity(report);
