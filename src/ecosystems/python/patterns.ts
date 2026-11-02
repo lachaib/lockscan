@@ -1,9 +1,10 @@
 import type { Pattern } from '../shared/scan.js';
 
 export const DANGEROUS_PATTERNS: Pattern[] = [
-  { regex: /\beval\s*\(/, label: 'exec:eval' },
-  { regex: /\bexec\s*\(/, label: 'exec:exec' },
-  { regex: /\bcompile\s*\(/, label: 'exec:compile' },
+  // Builtins only: `re.compile(...)` or `model.eval()` are attribute calls, `builtins.eval(...)` is not.
+  { regex: /(?<![.\w])(?:_{0,2}builtins_{0,2}\.)?eval\s*\(/, label: 'exec:eval' },
+  { regex: /(?<![.\w])(?:_{0,2}builtins_{0,2}\.)?exec\s*\(/, label: 'exec:exec' },
+  { regex: /(?<![.\w])(?:_{0,2}builtins_{0,2}\.)?compile\s*\(/, label: 'exec:compile' },
   { regex: /\b__import__\s*\(/, label: 'exec:__import__' },
   { regex: /\bimportlib\.import_module\b/, label: 'exec:importlib' },
   // Dynamic module loading from a file path (used to execute a dropped payload)
@@ -17,7 +18,11 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   { regex: /\bbase64\.b64decode\s*\(/, label: 'obfusc:base64' },
   { regex: /\bbytes\.fromhex\s*\(/, label: 'obfusc:fromhex' },
   { regex: /\\x[0-9a-fA-F]{2}/, label: 'obfusc:hex-escape' },
-  { regex: /\b(requests|httpx|aiohttp|ftplib|smtplib)\b/, label: 'net:http-lib' },
+  {
+    regex:
+      /\b(?:import|from)\s+(?:requests|httpx|aiohttp|ftplib|smtplib)\b|(?<![.\w])(?:requests|httpx|aiohttp|ftplib|smtplib)\.\w/,
+    label: 'net:http-lib',
+  },
   { regex: /\bsocket\.(socket|connect|create_connection)\b/, label: 'net:raw-socket' },
   { regex: /\bopen\s*\([^)]*["']w/, label: 'fs:file-write' },
   { regex: /\bos\.(remove|unlink)\s*\(/, label: 'fs:file-delete' },
@@ -32,5 +37,12 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
     label: 'cred:ci-token',
   },
 ];
+
+/** Labels whose evidence is a string literal; they run on a view that keeps short strings. */
+export const STRING_SCOPED_LABELS = new Set([
+  'obfusc:hex-escape',
+  'fs:file-write',
+  'cred:ci-token',
+]);
 
 export const PY_EXTENSIONS = new Set(['.py']);

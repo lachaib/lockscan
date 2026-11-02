@@ -51,7 +51,7 @@ Every source file inside the downloaded artifact is scanned with a catalogue of 
 
 | Label | Pattern | Why it matters |
 |---|---|---|
-| `exec:eval` / `exec:exec` / `exec:compile` | — | String-to-code execution |
+| `exec:eval` / `exec:exec` / `exec:compile` | builtin `eval(`, `exec(`, `compile(` | String-to-code execution (`re.compile(…)` and other attribute calls are not matched) |
 | `exec:__import__` / `exec:importlib` | `__import__(`, `importlib.import_module(` | Dynamic import from string — can load modules the static scanner would miss |
 | `exec:dynamic-load-path` | `importlib.util.spec_from_file_location(` | Loads a Python module from a filesystem path — used to execute a payload dropped to `/tmp` |
 | `shell:os.system` / `shell:os.popen` | — | Shell execution via the OS module |
@@ -59,12 +59,14 @@ Every source file inside the downloaded artifact is scanned with a catalogue of 
 | `deser:pickle` / `deser:marshal` | `pickle.loads(`, `marshal.loads(` | Arbitrary code execution hidden in a serialized object |
 | `deser:yaml.load` | `yaml.load(` without `Loader=SafeLoader` | Unsafe YAML deserialization |
 | `obfusc:base64` / `obfusc:fromhex` / `obfusc:hex-escape` | — | Encoded payload techniques |
-| `net:http-lib` | `requests`, `httpx`, `aiohttp`, `ftplib`, `smtplib` | Network I/O libraries |
+| `net:http-lib` | `import requests`, `requests.get(…)`, same for `httpx`, `aiohttp`, `ftplib`, `smtplib` | Network I/O libraries |
 | `net:raw-socket` | `socket.socket(`, `socket.connect(`, `create_connection(` | Raw TCP/UDP connections — unusual outside of networking packages |
 | `fs:file-write` / `fs:file-delete` / `fs:dir-delete` | `open(…,'w')`, `os.remove(`, `shutil.rmtree(` | Filesystem modification and deletion |
 | `native:ctypes-load` | `ctypes.CDLL(`, `ctypes.cdll.LoadLibrary(` | Loads a shared library dynamically — bypasses Python-level analysis entirely |
 | `native:cffi-load` | `cffi.FFI()`, `ffi.dlopen(` | Same via the C Foreign Function Interface |
 | `cred:ci-token` | `os.environ[…'GITHUB_TOKEN']`, `AWS_ACCESS_KEY_ID`, `PYPI_TOKEN`, `TWINE_PASSWORD`, `CODECOV_TOKEN` | Targeted CI credential exfiltration in Python |
+
+Python sources are matched after blanking comments, docstrings and string contents (f-strings are kept, since they hold expressions), so a name in a comment or string literal is not a hit. `obfusc:hex-escape`, `fs:file-write` and `cred:ci-token` read string literals and run on a view that keeps single-line strings. On ddtrace 4.15.6 this cut the hits from 626 to 137 (`net:http-lib` 354 → 23, `exec:compile` 144 → 10).
 
 ---
 

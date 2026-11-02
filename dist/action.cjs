@@ -32947,9 +32947,10 @@ var import_node_path15 = require("path");
 
 // src/ecosystems/python/patterns.ts
 var DANGEROUS_PATTERNS4 = [
-  { regex: /\beval\s*\(/, label: "exec:eval" },
-  { regex: /\bexec\s*\(/, label: "exec:exec" },
-  { regex: /\bcompile\s*\(/, label: "exec:compile" },
+  // Builtins only: `re.compile(...)` or `model.eval()` are attribute calls, `builtins.eval(...)` is not.
+  { regex: /(?<![.\w])(?:_{0,2}builtins_{0,2}\.)?eval\s*\(/, label: "exec:eval" },
+  { regex: /(?<![.\w])(?:_{0,2}builtins_{0,2}\.)?exec\s*\(/, label: "exec:exec" },
+  { regex: /(?<![.\w])(?:_{0,2}builtins_{0,2}\.)?compile\s*\(/, label: "exec:compile" },
   { regex: /\b__import__\s*\(/, label: "exec:__import__" },
   { regex: /\bimportlib\.import_module\b/, label: "exec:importlib" },
   // Dynamic module loading from a file path (used to execute a dropped payload)
@@ -32963,7 +32964,10 @@ var DANGEROUS_PATTERNS4 = [
   { regex: /\bbase64\.b64decode\s*\(/, label: "obfusc:base64" },
   { regex: /\bbytes\.fromhex\s*\(/, label: "obfusc:fromhex" },
   { regex: /\\x[0-9a-fA-F]{2}/, label: "obfusc:hex-escape" },
-  { regex: /\b(requests|httpx|aiohttp|ftplib|smtplib)\b/, label: "net:http-lib" },
+  {
+    regex: /\b(?:import|from)\s+(?:requests|httpx|aiohttp|ftplib|smtplib)\b|(?<![.\w])(?:requests|httpx|aiohttp|ftplib|smtplib)\.\w/,
+    label: "net:http-lib"
+  },
   { regex: /\bsocket\.(socket|connect|create_connection)\b/, label: "net:raw-socket" },
   { regex: /\bopen\s*\([^)]*["']w/, label: "fs:file-write" },
   { regex: /\bos\.(remove|unlink)\s*\(/, label: "fs:file-delete" },
@@ -32977,6 +32981,11 @@ var DANGEROUS_PATTERNS4 = [
     label: "cred:ci-token"
   }
 ];
+var STRING_SCOPED_LABELS = /* @__PURE__ */ new Set([
+  "obfusc:hex-escape",
+  "fs:file-write",
+  "cred:ci-token"
+]);
 var PY_EXTENSIONS = /* @__PURE__ */ new Set([".py"]);
 
 // src/utils/crypto.ts
@@ -33177,6 +33186,83 @@ async function fetchPyPIProvenance(name, version, artifacts) {
   }
 }
 
+// src/ecosystems/python/mask.ts
+var IDENT_CHAR = /[A-Za-z0-9_]/;
+var STRING_PREFIX = /^[rRbBuUfF]{1,2}$/;
+var blank = (s3) => s3.replace(/[^\n]/g, " ");
+function isFString(src, quoteAt) {
+  for (let len = 2; len >= 1; len--) {
+    const start = quoteAt - len;
+    if (start < 0) continue;
+    const prefix = src.slice(start, quoteAt);
+    if (!STRING_PREFIX.test(prefix)) continue;
+    if (start > 0 && IDENT_CHAR.test(src[start - 1])) continue;
+    return /[fF]/.test(prefix);
+  }
+  return false;
+}
+function maskPython(src) {
+  const code = [];
+  const text = [];
+  const n = src.length;
+  let i = 0;
+  while (i < n) {
+    const ch = src[i];
+    if (ch === "#") {
+      let end = src.indexOf("\n", i);
+      if (end < 0) end = n;
+      const blanked = blank(src.slice(i, end));
+      code.push(blanked);
+      text.push(blanked);
+      i = end;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      const triple = src.startsWith(ch.repeat(3), i);
+      const quote = triple ? ch.repeat(3) : ch;
+      const bodyStart = i + quote.length;
+      let j2 = bodyStart;
+      while (j2 < n) {
+        if (src[j2] === "\\") j2 += 2;
+        else if (triple ? src.startsWith(quote, j2) : src[j2] === ch) break;
+        else if (!triple && src[j2] === "\n") break;
+        else j2++;
+      }
+      const bodyEnd = Math.min(j2, n);
+      const closed = src.startsWith(quote, bodyEnd) && bodyEnd < n;
+      const body = src.slice(bodyStart, bodyEnd);
+      const close = closed ? quote : "";
+      if (isFString(src, i)) {
+        code.push(quote, body, close);
+        text.push(quote, body, close);
+      } else {
+        code.push(quote, blank(body), close);
+        text.push(quote, triple ? blank(body) : body, close);
+      }
+      i = bodyEnd + close.length;
+      continue;
+    }
+    code.push(ch);
+    text.push(ch);
+    i++;
+  }
+  return { code: code.join(""), text: text.join("") };
+}
+
+// src/ecosystems/python/scan.ts
+var CODE_PATTERNS = DANGEROUS_PATTERNS4.filter((p2) => !STRING_SCOPED_LABELS.has(p2.label));
+var STRING_PATTERNS = DANGEROUS_PATTERNS4.filter((p2) => STRING_SCOPED_LABELS.has(p2.label));
+function scanPythonPatterns(files) {
+  const code = /* @__PURE__ */ new Map();
+  const text = /* @__PURE__ */ new Map();
+  for (const [name, content] of files) {
+    const masked = maskPython(content);
+    code.set(name, masked.code);
+    text.set(name, masked.text);
+  }
+  return [...scanPatterns(code, CODE_PATTERNS), ...scanPatterns(text, STRING_PATTERNS)];
+}
+
 // src/ecosystems/python/index.ts
 async function scanArtifacts(artifacts, tmpDir, tag, keep) {
   return Promise.all(
@@ -33206,7 +33292,7 @@ async function scanArtifacts(artifacts, tmpDir, tag, keep) {
       return {
         artifact,
         files,
-        findings: [...scanPatterns(files, DANGEROUS_PATTERNS4), ...linkFindings(links)],
+        findings: [...scanPythonPatterns(files), ...linkFindings(links)],
         binaryScans
       };
     })
