@@ -3,6 +3,8 @@ import type { Platform } from './platforms.js';
 export type { Platform } from './platforms.js';
 export type ChangeType = 'added' | 'removed' | 'updated';
 
+export type Severity = 'critical' | 'high' | 'moderate' | 'low';
+
 /** A vulnerability record from the OSV database (osv.dev). */
 export interface KnownVuln {
   id: string;
@@ -80,6 +82,11 @@ export interface BinaryFinding {
   file: string;
   label: string;
   detail: string;
+  /** Stable rule id; equals `label` except for `native:<symbol>`, which is `binary:native-symbol`. */
+  rule?: string;
+  /** Dangerous symbol name, set for `native:<symbol>` findings. */
+  symbol?: string;
+  severity?: Severity;
 }
 
 export interface SecurityFinding {
@@ -88,6 +95,10 @@ export interface SecurityFinding {
   label: string;
   /** Extra context, e.g. the target of an archive symlink. */
   detail?: string;
+  /** Stable rule id; equals `label`. Set on delta findings. */
+  rule?: string;
+  /** Severity of this finding in context (family downgrade applied). Set on delta findings. */
+  severity?: Severity;
 }
 
 export interface ArtifactInfo {
@@ -170,6 +181,8 @@ export interface PackageAnalysis {
   installHooks?: InstallHook[];
   registryCheck?: RegistryCheck;
   codebaseUsage?: string[];
+  /** Highest severity across all signals for this package; null when it has none. */
+  maxSeverity?: Severity | null;
   error?: string;
 }
 
@@ -200,6 +213,12 @@ export interface SecurityReport {
     publisherChanges: number;
     licenseChanges: number;
     provenanceRegressions: number;
+    /** Highest severity across all packages; null when the report is clean. */
+    maxSeverity: Severity | null;
+    /** Number of packages at each maximum severity. */
+    bySeverity: Record<Severity, number>;
+    /** Number of individual delta findings (pattern and binary) at each severity. */
+    findingsBySeverity: Record<Severity, number>;
     ecosystems: string[];
   };
   lockfiles: LockfileAnalysis[];

@@ -459,6 +459,20 @@ SECURITY SCAN
 
 ---
 
+### JSON severity fields
+
+The JSON report (the `report` output and `json-to-file`) carries severity so consumers can gate without mirroring lockscan's rules:
+
+- `summary.maxSeverity` — highest severity in the report (`critical`, `high`, `moderate`, `low`), or `null` when clean.
+- `summary.bySeverity` — number of packages at each maximum severity.
+- `summary.findingsBySeverity` — number of individual pattern and binary delta findings at each severity.
+- `packages[].maxSeverity` — highest severity across all signals of that package, or `null`.
+- `securityFindings.delta[]` and `binaryFindings.delta[]` — each finding has `severity` (family downgrade applied) and `rule`, a stable id equal to `label`, except `native:<symbol>`, whose rule is `binary:native-symbol` with the name in `symbol`.
+
+All fields are additive; `label` is unchanged.
+
+---
+
 ## Programmatic API
 
 ```typescript
