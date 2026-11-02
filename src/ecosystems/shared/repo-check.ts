@@ -62,15 +62,19 @@ async function tagExists(owner: string, repo: string, tag: string): Promise<bool
   }
 }
 
-async function findTag(
-  owner: string,
-  repo: string,
-  version: string,
-  packageName: string,
-): Promise<string | undefined> {
-  // Most packages use one of these tag conventions
+/** Version spellings upstream may tag: `6.6` also as `6.6.0`, `1.0.0` also as `1.0` (never a bare major). */
+function versionAliases(version: string): string[] {
+  const parts = version.split('.');
+  if (!parts.every((p) => /^\d+$/.test(p))) return [];
+  if (parts.length === 2) return [`${version}.0`];
+  if (parts.length > 2 && parts[parts.length - 1] === '0') return [parts.slice(0, -1).join('.')];
+  return [];
+}
+
+/** Tag names to try for a package version, most common conventions first. */
+export function tagCandidates(version: string, packageName: string): string[] {
   const baseName = packageName.replace(/^@[^/]+\//, ''); // strip npm scope
-  const candidates = [
+  const exact = [
     `v${version}`,
     version,
     `${baseName}-${version}`,
@@ -78,6 +82,17 @@ async function findTag(
     `${baseName}-v${version}`,
     `${packageName}-${version}`,
   ];
+  const aliased = versionAliases(version).flatMap((v) => [`v${v}`, v, `${baseName}-${v}`]);
+  return [...new Set([...exact, ...aliased])];
+}
+
+async function findTag(
+  owner: string,
+  repo: string,
+  version: string,
+  packageName: string,
+): Promise<string | undefined> {
+  const candidates = tagCandidates(version, packageName);
   for (const tag of candidates) {
     if (await tagExists(owner, repo, tag)) return tag;
   }
