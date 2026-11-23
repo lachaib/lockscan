@@ -35,7 +35,15 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   { regex: /\\x[0-9a-fA-F]{2}/, label: 'obfusc:hex-escape' },
   { regex: /\batob\s*\(/, label: 'obfusc:atob' },
   // Network
-  { regex: /require\s*\(\s*['"]https?['"]/, label: 'net:http' },
+  { regex: new RegExp(`${MODULE_REF}(?:https?|http2)['"]`), label: 'net:http' },
+  {
+    regex: new RegExp(
+      `${MODULE_REF}(?:undici|node-fetch|superagent|needle)['"]|\\bnew\\s+(?:XMLHttpRequest|WebSocket)\\s*\\(`,
+    ),
+    label: 'net:http-client',
+  },
+  { regex: new RegExp(`${MODULE_REF}(?:net|tls|dgram)['"]`), label: 'net:raw-socket' },
+  { regex: new RegExp(`${MODULE_REF}dns(?:/promises)?['"]`), label: 'net:dns' },
   { regex: /\bfetch\s*\(/, label: 'net:fetch' },
   { regex: /\baxios\b/, label: 'net:axios' },
   { regex: /\bgot\s*\(/, label: 'net:got' },

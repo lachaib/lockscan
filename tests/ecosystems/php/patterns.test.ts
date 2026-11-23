@@ -274,3 +274,22 @@ describe('detectComposerHooks', () => {
     expect(detectComposerHooks(f)).toHaveLength(0);
   });
 });
+
+describe('scanPatterns — php: network coverage', () => {
+  const labels = (src: string): string[] =>
+    scanPatterns(files({ 'a.php': `<?php ${src}` }), DANGEROUS_PATTERNS).map((f) => f.label);
+
+  it.each([
+    ['$c = curl_init("https://x.example");', 'net:curl_exec'],
+    ['curl_multi_exec($mh, $running);', 'net:curl_exec'],
+    ['fopen("https://x.example/p", "r");', 'net:file_get_contents-url'],
+    ['dns_get_record("x.example", DNS_TXT);', 'net:dns'],
+    ['gethostbyname("x.example");', 'net:dns'],
+  ])('%s -> %s', (src, label) => {
+    expect(labels(src)).toContain(label);
+  });
+
+  it('does not match local method names', () => {
+    expect(labels('$this->curl_init_wrapper();')).not.toContain('net:curl_exec');
+  });
+});

@@ -27461,6 +27461,14 @@ var HIGH_PATTERNS = /* @__PURE__ */ new Set([
   "deser:pickle",
   "deser:marshal"
 ]);
+var SOCKET_LABELS = [
+  "net:raw-socket",
+  "net:dns",
+  "net:fsockopen",
+  "net:stream_socket_client",
+  "net:Deno.connect",
+  "net:Deno.connectTls"
+];
 var MODERATE_PATTERNS = /* @__PURE__ */ new Set([
   "archive:symlink",
   "shell:require-child_process",
@@ -27474,7 +27482,8 @@ var MODERATE_PATTERNS = /* @__PURE__ */ new Set([
   "exec:dynamic-load-path",
   "deser:yaml.load",
   "deser:generic",
-  "cred:generic-secret"
+  "cred:generic-secret",
+  ...SOCKET_LABELS
 ]);
 var PATTERN_FAMILIES = {
   "dynamic-import": [
@@ -27493,7 +27502,8 @@ var PATTERN_FAMILIES = {
     "shell:execFileSync",
     "shell:require-child_process"
   ],
-  deser: ["deser:pickle", "deser:marshal", "deser:yaml.load", "deser:generic"]
+  deser: ["deser:pickle", "deser:marshal", "deser:yaml.load", "deser:generic"],
+  socket: SOCKET_LABELS
 };
 var LABEL_TO_FAMILY = /* @__PURE__ */ new Map();
 for (const members of Object.values(PATTERN_FAMILIES)) {
@@ -33225,7 +33235,15 @@ var DANGEROUS_PATTERNS = [
   { regex: /\\x[0-9a-fA-F]{2}/, label: "obfusc:hex-escape" },
   { regex: /\batob\s*\(/, label: "obfusc:atob" },
   // Network
-  { regex: /require\s*\(\s*['"]https?['"]/, label: "net:http" },
+  { regex: new RegExp(`${MODULE_REF}(?:https?|http2)['"]`), label: "net:http" },
+  {
+    regex: new RegExp(
+      `${MODULE_REF}(?:undici|node-fetch|superagent|needle)['"]|\\bnew\\s+(?:XMLHttpRequest|WebSocket)\\s*\\(`
+    ),
+    label: "net:http-client"
+  },
+  { regex: new RegExp(`${MODULE_REF}(?:net|tls|dgram)['"]`), label: "net:raw-socket" },
+  { regex: new RegExp(`${MODULE_REF}dns(?:/promises)?['"]`), label: "net:dns" },
   { regex: /\bfetch\s*\(/, label: "net:fetch" },
   { regex: /\baxios\b/, label: "net:axios" },
   { regex: /\bgot\s*\(/, label: "net:got" },
@@ -33810,9 +33828,10 @@ var DANGEROUS_PATTERNS3 = [
   // Network I/O
   { regex: /\bfsockopen\s*\(/, label: "net:fsockopen" },
   { regex: /\bstream_socket_client\s*\(/, label: "net:stream_socket_client" },
-  { regex: /\bcurl_exec\s*\(/, label: "net:curl_exec" },
+  { regex: /\bcurl_(?:exec|multi_exec|init)\s*\(/, label: "net:curl_exec" },
+  { regex: /\b(?:dns_get_record|gethostbyname|checkdnsrr)\s*\(/, label: "net:dns" },
   // file_get_contents is dual-use; flag when called with a URL-like argument
-  { regex: /\bfile_get_contents\s*\(\s*['"]https?:/, label: "net:file_get_contents-url" },
+  { regex: /\b(?:file_get_contents|fopen)\s*\(\s*['"]https?:/, label: "net:file_get_contents-url" },
   // Filesystem writes / deletes
   { regex: /\bfile_put_contents\s*\(/, label: "fs:file_put_contents" },
   { regex: /\bfwrite\s*\(/, label: "fs:fwrite" },
@@ -34001,10 +34020,17 @@ var DANGEROUS_PATTERNS4 = [
   { regex: /\bbytes\.fromhex\s*\(/, label: "obfusc:fromhex" },
   { regex: /\\x[0-9a-fA-F]{2}/, label: "obfusc:hex-escape" },
   {
-    regex: /\b(?:import|from)\s+(?:requests|httpx|aiohttp|ftplib|smtplib)\b|(?<![.\w])(?:requests|httpx|aiohttp|ftplib|smtplib)\.\w/,
+    regex: /\b(?:import|from)\s+(?:requests|httpx|aiohttp|ftplib|smtplib|urllib3|urllib\.request|http\.client|websockets?)\b|\bfrom\s+urllib\s+import\s+request\b|(?<![.\w])(?:requests|httpx|aiohttp|ftplib|smtplib|urllib3|urllib\.request|http\.client)\.\w/,
     label: "net:http-lib"
   },
-  { regex: /\bsocket\.(socket|connect|create_connection)\b/, label: "net:raw-socket" },
+  {
+    regex: /\bsocket\.(socket|connect|create_connection)\b|\basyncio\.(?:open_connection|start_server)\b/,
+    label: "net:raw-socket"
+  },
+  {
+    regex: /\bsocket\.(?:gethostbyname(?:_ex)?|getaddrinfo)\b|\bdns\.resolver\b/,
+    label: "net:dns"
+  },
   { regex: /\bopen\s*\([^)]*["']w/, label: "fs:file-write" },
   { regex: /\bos\.(remove|unlink)\s*\(/, label: "fs:file-delete" },
   { regex: /\bshutil\.rmtree\s*\(/, label: "fs:dir-delete" },

@@ -60,3 +60,23 @@ describe('scanPythonPatterns — real hits are kept', () => {
     expect(finding).toMatchObject({ label: 'exec:eval', line: 4 });
   });
 });
+
+describe('scanPythonPatterns — network coverage', () => {
+  it.each([
+    ['import urllib.request', 'net:http-lib'],
+    ['urllib.request.urlopen("https://x.example")', 'net:http-lib'],
+    ['from urllib import request', 'net:http-lib'],
+    ['import http.client', 'net:http-lib'],
+    ['import urllib3', 'net:http-lib'],
+    ['await asyncio.open_connection("x.example", 80)', 'net:raw-socket'],
+    ['socket.gethostbyname("x.example")', 'net:dns'],
+    ['import dns.resolver', 'net:dns'],
+  ])('%s -> %s', (src, label) => {
+    expect(labels(src)).toContain(label);
+  });
+
+  it('ignores network names in comments and strings', () => {
+    expect(labels('# import urllib.request')).toEqual([]);
+    expect(labels('x = "http.client"')).toEqual([]);
+  });
+});

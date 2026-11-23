@@ -41,7 +41,10 @@ Every source file inside the downloaded artifact is scanned with a catalogue of 
 | `obfusc:fromCharCode` | `String.fromCharCode(` | Character-code obfuscation, used in many npm attacks |
 | `obfusc:hex-escape` | `\xNN` sequences | Hex-encoded strings to bypass simple scanners |
 | `obfusc:atob` | `atob(` | Base64 decode in browser-targeting code |
-| `net:http` / `net:fetch` / `net:axios` / `net:got` | — | Outbound network I/O — expected in a network library, suspicious in a math/utility package |
+| `net:http` | `http`, `https`, `http2` imported via `require`, `import`, `import()`, with or without `node:` | Outbound HTTP — expected in a network library, suspicious in a math/utility package |
+| `net:http-client` | `undici`, `node-fetch`, `superagent`, `needle`, `new XMLHttpRequest(`, `new WebSocket(` | Other HTTP / WebSocket clients |
+| `net:fetch` / `net:axios` / `net:got` | — | HTTP clients |
+| `net:raw-socket` / `net:dns` | `net`, `tls`, `dgram`, `dns` modules | Raw sockets and DNS — a typical exfiltration channel; **moderate** (HTTP-level `net:*` labels stay **low**) |
 | `fs:writeFileSync` / `fs:async-write` / `fs:rmSync` / `fs:unlinkSync` | — | Filesystem writes and deletes |
 | `info:process.env` | `process.env` | Environment variable access |
 | `cred:ci-token` | `process.env.NAME`, `process.env['NAME']` or `const { NAME } = process.env` for a CI/registry/cloud credential variable (`GITHUB_TOKEN`, `GH_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, `ACTIONS_RUNTIME_TOKEN`, `NPM_TOKEN`, `AWS_*`, `CI_JOB_TOKEN`, … — full list in `src/ecosystems/shared/ci-env.ts`) | Targeted CI credential exfiltration — exact pattern used in **event-stream (2018)**, **ctx (2022)**, **dbus-next (2022)** |
@@ -62,8 +65,8 @@ JavaScript and Deno sources are scanned with the extensions `.js .mjs .cjs .jsx 
 | `deser:pickle` / `deser:marshal` | `pickle.loads(`, `marshal.loads(` | Arbitrary code execution hidden in a serialized object |
 | `deser:yaml.load` | `yaml.load(` without `Loader=SafeLoader` | Unsafe YAML deserialization |
 | `obfusc:base64` / `obfusc:fromhex` / `obfusc:hex-escape` | — | Encoded payload techniques |
-| `net:http-lib` | `import requests`, `requests.get(…)`, same for `httpx`, `aiohttp`, `ftplib`, `smtplib` | Network I/O libraries |
-| `net:raw-socket` | `socket.socket(`, `socket.connect(`, `create_connection(` | Raw TCP/UDP connections — unusual outside of networking packages |
+| `net:http-lib` | `import requests`, `requests.get(…)`, same for `httpx`, `aiohttp`, `ftplib`, `smtplib`, `urllib3`, `urllib.request`, `http.client` | Network I/O libraries |
+| `net:raw-socket` / `net:dns` | `socket.socket(`, `socket.connect(`, `create_connection(`, `asyncio.open_connection(`; `socket.gethostbyname(`, `getaddrinfo(`, `dns.resolver` | Raw TCP/UDP connections and DNS lookups — unusual outside of networking packages; moderate |
 | `fs:file-write` / `fs:file-delete` / `fs:dir-delete` | `open(…,'w')`, `os.remove(`, `shutil.rmtree(` | Filesystem modification and deletion |
 | `native:ctypes-load` | `ctypes.CDLL(`, `ctypes.cdll.LoadLibrary(` | Loads a shared library dynamically — bypasses Python-level analysis entirely |
 | `native:cffi-load` | `cffi.FFI()`, `ffi.dlopen(` | Same via the C Foreign Function Interface |

@@ -85,3 +85,29 @@ describe('patternSeverity — credential labels', () => {
     expect(patternSeverity('cred:generic-secret')).toBe('moderate');
   });
 });
+
+describe('network severity', () => {
+  it('keeps HTTP-level labels low and raises sockets and DNS to moderate', () => {
+    for (const l of ['net:http', 'net:http-client', 'net:fetch', 'net:axios', 'net:http-lib']) {
+      expect(patternSeverity(l)).toBe('low');
+    }
+    for (const l of ['net:raw-socket', 'net:dns', 'net:Deno.connect', 'net:fsockopen']) {
+      expect(patternSeverity(l)).toBe('moderate');
+    }
+  });
+
+  it('downgrades a socket finding to low when the socket family did not grow', () => {
+    const f = { file: 'a.js', line: 1, label: 'net:raw-socket' };
+    const g = { file: 'b.js', line: 1, label: 'net:dns' };
+    const grown = withSeverity({
+      ...base,
+      securityFindings: { old: [], new: [f, g, g, g], delta: [f], platformDivergence: false },
+    });
+    const lateral = withSeverity({
+      ...base,
+      securityFindings: { old: [g], new: [f], delta: [f], platformDivergence: false },
+    });
+    expect(grown.securityFindings?.delta[0].severity).toBe('moderate');
+    expect(lateral.securityFindings?.delta[0].severity).toBe('low');
+  });
+});

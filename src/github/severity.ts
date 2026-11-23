@@ -27,6 +27,16 @@ const HIGH_PATTERNS = new Set([
   'deser:marshal',
 ]);
 
+// Raw sockets and DNS lookups: rarer than HTTP clients and a typical exfiltration channel.
+const SOCKET_LABELS = [
+  'net:raw-socket',
+  'net:dns',
+  'net:fsockopen',
+  'net:stream_socket_client',
+  'net:Deno.connect',
+  'net:Deno.connectTls',
+];
+
 // Patterns that enable shell execution or unsafe deserialization.
 const MODERATE_PATTERNS = new Set([
   'archive:symlink',
@@ -42,6 +52,7 @@ const MODERATE_PATTERNS = new Set([
   'deser:yaml.load',
   'deser:generic',
   'cred:generic-secret',
+  ...SOCKET_LABELS,
 ]);
 
 // Groups of labels that represent the same underlying capability. When the family's
@@ -65,6 +76,7 @@ const PATTERN_FAMILIES: Record<string, string[]> = {
     'shell:require-child_process',
   ],
   deser: ['deser:pickle', 'deser:marshal', 'deser:yaml.load', 'deser:generic'],
+  socket: SOCKET_LABELS,
 };
 
 const LABEL_TO_FAMILY = new Map<string, string[]>();

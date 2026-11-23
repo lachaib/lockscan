@@ -40,9 +40,10 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   // Network I/O
   { regex: /\bfsockopen\s*\(/, label: 'net:fsockopen' },
   { regex: /\bstream_socket_client\s*\(/, label: 'net:stream_socket_client' },
-  { regex: /\bcurl_exec\s*\(/, label: 'net:curl_exec' },
+  { regex: /\bcurl_(?:exec|multi_exec|init)\s*\(/, label: 'net:curl_exec' },
+  { regex: /\b(?:dns_get_record|gethostbyname|checkdnsrr)\s*\(/, label: 'net:dns' },
   // file_get_contents is dual-use; flag when called with a URL-like argument
-  { regex: /\bfile_get_contents\s*\(\s*['"]https?:/, label: 'net:file_get_contents-url' },
+  { regex: /\b(?:file_get_contents|fopen)\s*\(\s*['"]https?:/, label: 'net:file_get_contents-url' },
   // Filesystem writes / deletes
   { regex: /\bfile_put_contents\s*\(/, label: 'fs:file_put_contents' },
   { regex: /\bfwrite\s*\(/, label: 'fs:fwrite' },

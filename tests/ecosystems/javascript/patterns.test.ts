@@ -71,3 +71,31 @@ describe('extractTarball — TypeScript sources', () => {
     ).toBe(true);
   });
 });
+
+describe('network patterns — JS', () => {
+  it.each([
+    ["const https = require('https');", 'net:http'],
+    ["const https = require('node:https');", 'net:http'],
+    ["import https from 'node:https';", 'net:http'],
+    ["import { request } from 'http2';", 'net:http'],
+    ["const h = await import('node:http');", 'net:http'],
+    ["import { request } from 'undici';", 'net:http-client'],
+    ["const f = require('node-fetch');", 'net:http-client'],
+    ['const x = new XMLHttpRequest();', 'net:http-client'],
+    ["const ws = new WebSocket('wss://x.example');", 'net:http-client'],
+    ["import net from 'node:net';", 'net:raw-socket'],
+    ["const tls = require('tls');", 'net:raw-socket'],
+    ["import dgram from 'dgram';", 'net:raw-socket'],
+    ["import dns from 'node:dns/promises';", 'net:dns'],
+    ["const dns = require('dns');", 'net:dns'],
+  ])('%s -> %s', (src, label) => {
+    expect(labels(src)).toContain(label);
+  });
+
+  it('does not match look-alikes', () => {
+    expect(labels("import x from './http-utils';")).not.toContain('net:http');
+    expect(labels("import x from 'my-net';")).not.toContain('net:raw-socket');
+    expect(labels('prefetch(url)')).not.toContain('net:fetch');
+    expect(labels("import x from 'dnsmasq';")).not.toContain('net:dns');
+  });
+});

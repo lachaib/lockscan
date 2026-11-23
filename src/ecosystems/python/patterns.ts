@@ -25,10 +25,18 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   { regex: /\\x[0-9a-fA-F]{2}/, label: 'obfusc:hex-escape' },
   {
     regex:
-      /\b(?:import|from)\s+(?:requests|httpx|aiohttp|ftplib|smtplib)\b|(?<![.\w])(?:requests|httpx|aiohttp|ftplib|smtplib)\.\w/,
+      /\b(?:import|from)\s+(?:requests|httpx|aiohttp|ftplib|smtplib|urllib3|urllib\.request|http\.client|websockets?)\b|\bfrom\s+urllib\s+import\s+request\b|(?<![.\w])(?:requests|httpx|aiohttp|ftplib|smtplib|urllib3|urllib\.request|http\.client)\.\w/,
     label: 'net:http-lib',
   },
-  { regex: /\bsocket\.(socket|connect|create_connection)\b/, label: 'net:raw-socket' },
+  {
+    regex:
+      /\bsocket\.(socket|connect|create_connection)\b|\basyncio\.(?:open_connection|start_server)\b/,
+    label: 'net:raw-socket',
+  },
+  {
+    regex: /\bsocket\.(?:gethostbyname(?:_ex)?|getaddrinfo)\b|\bdns\.resolver\b/,
+    label: 'net:dns',
+  },
   { regex: /\bopen\s*\([^)]*["']w/, label: 'fs:file-write' },
   { regex: /\bos\.(remove|unlink)\s*\(/, label: 'fs:file-delete' },
   { regex: /\bshutil\.rmtree\s*\(/, label: 'fs:dir-delete' },
