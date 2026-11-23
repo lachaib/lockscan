@@ -47,6 +47,7 @@ Every source file inside the downloaded artifact is scanned with a catalogue of 
 | `net:raw-socket` / `net:dns` | `net`, `tls`, `dgram`, `dns` modules | Raw sockets and DNS — a typical exfiltration channel; **moderate** (HTTP-level `net:*` labels stay **low**) |
 | `fs:writeFileSync` / `fs:async-write` / `fs:rmSync` / `fs:unlinkSync` | — | Filesystem writes and deletes |
 | `info:process.env` | `process.env` | Environment variable access |
+| `env:enumerate` | `JSON.stringify(process.env)`, `Object.keys/values/entries/assign(process.env)`, `{ ...process.env }`, `for (… in process.env)` | Dumps the whole environment instead of reading one variable; Deno: `Deno.env.toObject()` |
 | `cred:ci-token` | `process.env.NAME`, `process.env['NAME']` or `const { NAME } = process.env` for a CI/registry/cloud credential variable (`GITHUB_TOKEN`, `GH_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, `ACTIONS_RUNTIME_TOKEN`, `NPM_TOKEN`, `AWS_*`, `CI_JOB_TOKEN`, … — full list in `src/ecosystems/shared/ci-env.ts`) | Targeted CI credential exfiltration — exact pattern used in **event-stream (2018)**, **ctx (2022)**, **dbus-next (2022)** |
 | `cred:generic-secret` | same access forms for any other `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `*_API_KEY` name | Secret-looking variable read; moderate because many SDKs read their own configured token |
 | `cred:git-credentials` | the literals `extraheader` (git `http.<url>.extraheader`) or `.git-credentials` | CI checkouts persist their token in `.git/config`; reading it yields the credential without touching an environment variable. **critical** |
@@ -72,11 +73,23 @@ JavaScript and Deno sources are scanned with the extensions `.js .mjs .cjs .jsx 
 | `fs:file-write` / `fs:file-delete` / `fs:dir-delete` | `open(…,'w')`, `os.remove(`, `shutil.rmtree(` | Filesystem modification and deletion |
 | `native:ctypes-load` | `ctypes.CDLL(`, `ctypes.cdll.LoadLibrary(` | Loads a shared library dynamically — bypasses Python-level analysis entirely |
 | `native:cffi-load` | `cffi.FFI()`, `ffi.dlopen(` | Same via the C Foreign Function Interface |
+| `env:enumerate` | `dict(os.environ)`, `os.environ.items()`, `json.dumps(os.environ)`, `**os.environ`, `for … in os.environ` | Dumps the whole environment; PHP: `getenv()` without argument, `json_encode($_ENV)`, `foreach ($_ENV as …)` |
 | `cred:ci-token` / `cred:generic-secret` | `os.environ["NAME"]`, `os.environ.get("NAME")`, `os.getenv("NAME")` with the same variable list as JavaScript | Targeted CI credential exfiltration in Python |
 | `cred:git-credentials` | the literals `extraheader` (git `http.<url>.extraheader`) or `.git-credentials` | CI checkouts persist their token in `.git/config`; reading it yields the credential without touching an environment variable. **critical** |
 | `fs:git-dir` | the literal `.git/` path fragment or a quoted `'.git'` segment | Access to git metadata. **moderate**, not higher: hook installers, git wrappers and release tools legitimately read `.git/` |
 
 Python sources are matched after blanking comments, docstrings and string contents (f-strings are kept, since they hold expressions), so a name in a comment or string literal is not a hit. `obfusc:hex-escape`, `fs:file-write` and `cred:ci-token` read string literals and run on a view that keeps single-line strings. On ddtrace 4.15.6 this cut the hits from 626 to 137 (`net:http-lib` 354 → 23, `exec:compile` 144 → 10).
+
+#### Compound escalation (`compound:env-exfil`)
+
+Severity is normally per label, which cannot express the usual exfiltration shape: collect something sensitive, then send it. When a new version adds **network I/O** (`net:*`, and the network findings must have grown, so swapping one client for another is ignored) together with any of the following, the participating findings are raised and tagged `compound:env-exfil` in the report:
+
+| New in the same package version | Severity |
+|---|---|
+| `env:enumerate`, a `cred:*` label (except `cred:generic-secret`) or strong obfuscation (`obfusc:eval-decode`, `obfusc:fromCharCode`, `obfusc:str_rot13`, `obfusc:gzinflate`, `obfusc:gzuncompress`, `obfusc:hex2bin`, `exec:dynamic-require`, `exec:dynamic-load-path`) | **high** |
+| `env:enumerate` plus a credential label or any obfuscation label (including `obfusc:base64`, `obfusc:atob`, `obfusc:fromhex`, `obfusc:base64_decode`) | **critical** |
+
+Plain base64 and hex escapes are common in benign code, so they only count together with environment enumeration. A single-variable token read next to an HTTP call (`cred:generic-secret`) is what ordinary SDKs do and does not escalate. Both signals must be new in the delta: a package that already enumerated the environment and used the network does not escalate.
 
 #### Known limitations of static pattern scanning
 

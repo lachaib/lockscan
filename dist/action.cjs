@@ -27510,6 +27510,25 @@ var LABEL_TO_FAMILY = /* @__PURE__ */ new Map();
 for (const members of Object.values(PATTERN_FAMILIES)) {
   for (const label of members) LABEL_TO_FAMILY.set(label, members);
 }
+var COMPOUND_EXFIL = "compound:env-exfil";
+var STRONG_OBFUSCATION = /* @__PURE__ */ new Set([
+  "obfusc:eval-decode",
+  "obfusc:fromCharCode",
+  "obfusc:str_rot13",
+  "obfusc:gzinflate",
+  "obfusc:gzuncompress",
+  "obfusc:hex2bin",
+  "exec:dynamic-require",
+  "exec:dynamic-load-path"
+]);
+var WEAK_OBFUSCATION = /* @__PURE__ */ new Set([
+  "obfusc:base64",
+  "obfusc:atob",
+  "obfusc:fromhex",
+  "obfusc:base64_decode"
+]);
+var isNet = (label) => label.startsWith("net:");
+var isCredential = (label) => label.startsWith("cred:") && label !== "cred:generic-secret";
 function patternSeverity(label) {
   if (CRITICAL_PATTERNS.has(label)) return "critical";
   if (HIGH_PATTERNS.has(label)) return "high";
@@ -27561,6 +27580,40 @@ function binaryFindingSeverity(label) {
   if (label === "binary:base64") return "low";
   return "high";
 }
+function countPrefix(findings, match) {
+  return findings.filter((f2) => match(f2.label)).length;
+}
+function compoundSeverity(oldF, newF, delta) {
+  const labels = new Set(delta.map((f2) => f2.label));
+  const netGrew = countPrefix(newF, isNet) > countPrefix(oldF, isNet);
+  if (!netGrew || ![...labels].some(isNet)) return null;
+  const enumerates = labels.has("env:enumerate");
+  const credential = [...labels].some(isCredential);
+  const strongObf = [...labels].some((l) => STRONG_OBFUSCATION.has(l));
+  const weakObf = [...labels].some((l) => WEAK_OBFUSCATION.has(l));
+  if (enumerates && (credential || strongObf || weakObf)) return "critical";
+  if (enumerates || credential || strongObf) return "high";
+  return null;
+}
+function isCompoundMember(label) {
+  return isNet(label) || label === "env:enumerate" || isCredential(label) || STRONG_OBFUSCATION.has(label) || WEAK_OBFUSCATION.has(label);
+}
+function annotateDelta(sf) {
+  const { old: oldF, new: newF, delta } = sf;
+  const oldCount = countByLabel(oldF);
+  const newCount = countByLabel(newF);
+  const compound = compoundSeverity(oldF, newF, delta);
+  return delta.map((f2) => {
+    const own = effectivePatternSeverity(f2.label, oldCount, newCount);
+    const escalated = compound && isCompoundMember(f2.label) && higher(own, compound) !== own;
+    return {
+      ...f2,
+      rule: f2.label,
+      severity: escalated ? compound : own,
+      ...escalated && { escalation: COMPOUND_EXFIL }
+    };
+  });
+}
 function packageMaxSeverity(pkg) {
   let s3 = null;
   for (const v2 of pkg.knownVulns ?? []) {
@@ -27568,11 +27621,8 @@ function packageMaxSeverity(pkg) {
     if (vs2) s3 = higher(s3, vs2);
   }
   if (pkg.securityFindings?.delta.length) {
-    const { old: oldF, new: newF, delta } = pkg.securityFindings;
-    const oldCount = countByLabel(oldF);
-    const newCount = countByLabel(newF);
-    for (const f2 of delta) {
-      s3 = higher(s3, effectivePatternSeverity(f2.label, oldCount, newCount));
+    for (const f2 of annotateDelta(pkg.securityFindings)) {
+      s3 = higher(s3, f2.severity ?? "low");
     }
   }
   for (const f2 of pkg.binaryFindings?.delta ?? []) {
@@ -27624,17 +27674,7 @@ function withSeverity(pkg) {
   if (pkg.error) return pkg;
   const out = { ...pkg, maxSeverity: packageMaxSeverity(pkg) };
   if (pkg.securityFindings) {
-    const { old: oldF, new: newF, delta } = pkg.securityFindings;
-    const oldCount = countByLabel(oldF);
-    const newCount = countByLabel(newF);
-    out.securityFindings = {
-      ...pkg.securityFindings,
-      delta: delta.map((f2) => ({
-        ...f2,
-        rule: f2.label,
-        severity: effectivePatternSeverity(f2.label, oldCount, newCount)
-      }))
-    };
+    out.securityFindings = { ...pkg.securityFindings, delta: annotateDelta(pkg.securityFindings) };
   }
   if (pkg.binaryFindings) {
     out.binaryFindings = {
@@ -27737,6 +27777,8 @@ function buildSignals(pkg) {
   if ((pkg.knownVulns?.length ?? 0) > 3) {
     signals.push(`+${pkg.knownVulns.length - 3} more CVEs`);
   }
+  const escalation = pkg.securityFindings?.delta.find((f2) => f2.escalation)?.escalation;
+  if (escalation) signals.push(escalation);
   for (const f2 of pkg.securityFindings?.delta.slice(0, 3) ?? []) {
     signals.push(f2.label);
   }
@@ -27809,6 +27851,8 @@ function packageSignals(pkg) {
   if ((pkg.knownVulns?.length ?? 0) > 2) {
     signals.push(`+${pkg.knownVulns.length - 2} more CVEs`);
   }
+  const escalation = pkg.securityFindings?.delta.find((f2) => f2.escalation)?.escalation;
+  if (escalation) signals.push(`\`${escalation}\``);
   for (const f2 of pkg.securityFindings?.delta.slice(0, 3) ?? []) {
     signals.push(`\`${f2.label}\``);
   }
@@ -28111,9 +28155,9 @@ function resultsForPackage(pkg, ecosystem, lockfilePath, workspace) {
     seenLabels.add(f2.label);
     results.push({
       ruleId: "lockscan/source-pattern",
-      level: sarifLevel(patternSeverity(f2.label)),
+      level: sarifLevel(f2.severity ?? patternSeverity(f2.label)),
       message: {
-        text: `${pkg.name} (${versionStr}) introduced dangerous pattern \`${f2.label}\` (first seen in ${f2.file}:${f2.line})`
+        text: `${pkg.name} (${versionStr}) introduced dangerous pattern \`${f2.label}\` (first seen in ${f2.file}:${f2.line})${f2.escalation ? `, escalated by ${f2.escalation}` : ""}`
       },
       locations: [loc]
     });
@@ -33256,6 +33300,11 @@ var DANGEROUS_PATTERNS = [
   { regex: /\bfs\.promises\.(writeFile|rm|unlink|mkdir)\b/, label: "fs:async-write" },
   // Process / environment
   { regex: /\bprocess\.env\b/, label: "info:process.env" },
+  // Whole-environment enumeration (membership tests such as `'X' in process.env` are not matched)
+  {
+    regex: /\bJSON\.stringify\s*\(\s*process\.env\s*[,)]|\bObject\.(?:keys|values|entries|fromEntries|assign)\s*\([^)]*\bprocess\.env\s*[,)]|\.\.\.\s*process\.env\b(?![.[])|\bfor\s*\([^)]*\bin\s+process\.env\b(?![.[])/,
+    label: "env:enumerate"
+  },
   // Targeted CI credential access
   { regex: envAccess(CI_NAME), label: "cred:ci-token" },
   { regex: envAccess(GENERIC_SECRET_NAME), label: "cred:generic-secret" },
@@ -33289,6 +33338,7 @@ var DENO_PATTERNS = [
   { regex: /\bDeno\.remove\s*\(/, label: "fs:Deno.remove" },
   // Environment access
   { regex: /\bDeno\.env\.(?:get|toObject|has)\s*\(/, label: "info:Deno.env" },
+  { regex: /\bDeno\.env\.toObject\s*\(/, label: "env:enumerate" },
   // CI token targeting via Deno.env
   { regex: denoEnvGet(CI_NAME), label: "cred:ci-token" },
   { regex: denoEnvGet(GENERIC_SECRET_NAME), label: "cred:generic-secret" },
@@ -33845,6 +33895,11 @@ var DANGEROUS_PATTERNS3 = [
   { regex: /\bgetenv\s*\(/, label: "info:getenv" },
   { regex: /\$_ENV\b/, label: "info:$_ENV" },
   { regex: /\$_SERVER\b/, label: "info:$_SERVER" },
+  // Whole-environment enumeration
+  {
+    regex: /\bgetenv\s*\(\s*\)|\b(?:json_encode|serialize|print_r|var_export|var_dump|http_build_query|array_keys|implode)\s*\(\s*\$_(?:ENV|SERVER)\s*[,)]|\bforeach\s*\(\s*\$_(?:ENV|SERVER)\s+as\b/,
+    label: "env:enumerate"
+  },
   // Targeted CI credential access
   { regex: envAccess2(CI_NAME), label: "cred:ci-token" },
   { regex: envAccess2(GENERIC_SECRET_NAME), label: "cred:generic-secret" },
@@ -34044,6 +34099,11 @@ var DANGEROUS_PATTERNS4 = [
   // Native library loading via ctypes / cffi (can bypass Python-level analysis entirely)
   { regex: /\bctypes\.CDLL\s*\(|ctypes\.cdll\.LoadLibrary\s*\(/, label: "native:ctypes-load" },
   { regex: /\bcffi\.FFI\s*\(\)|ffi\.dlopen\s*\(/, label: "native:cffi-load" },
+  // Whole-environment enumeration (`"X" in os.environ` membership tests are not matched)
+  {
+    regex: /\bos\.environ\.(?:items|keys|values|copy)\s*\(|\b(?:dict|list|str|repr|sorted|json\.dumps)\s*\(\s*os\.environ\s*[,)]|\*\*\s*os\.environ\b|\bfor\s+[\w\s,()]+\bin\s+os\.environ\b(?![.[])/,
+    label: "env:enumerate"
+  },
   // Targeted CI / secret credential access
   { regex: envAccess3(CI_NAME), label: "cred:ci-token" },
   { regex: envAccess3(GENERIC_SECRET_NAME), label: "cred:generic-secret" },

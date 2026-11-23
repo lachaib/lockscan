@@ -55,6 +55,12 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   { regex: /\bfs\.promises\.(writeFile|rm|unlink|mkdir)\b/, label: 'fs:async-write' },
   // Process / environment
   { regex: /\bprocess\.env\b/, label: 'info:process.env' },
+  // Whole-environment enumeration (membership tests such as `'X' in process.env` are not matched)
+  {
+    regex:
+      /\bJSON\.stringify\s*\(\s*process\.env\s*[,)]|\bObject\.(?:keys|values|entries|fromEntries|assign)\s*\([^)]*\bprocess\.env\s*[,)]|\.\.\.\s*process\.env\b(?![.[])|\bfor\s*\([^)]*\bin\s+process\.env\b(?![.[])/,
+    label: 'env:enumerate',
+  },
   // Targeted CI credential access
   { regex: envAccess(CI_NAME), label: 'cred:ci-token' },
   { regex: envAccess(GENERIC_SECRET_NAME), label: 'cred:generic-secret' },

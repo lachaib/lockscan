@@ -43,6 +43,12 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   // Native library loading via ctypes / cffi (can bypass Python-level analysis entirely)
   { regex: /\bctypes\.CDLL\s*\(|ctypes\.cdll\.LoadLibrary\s*\(/, label: 'native:ctypes-load' },
   { regex: /\bcffi\.FFI\s*\(\)|ffi\.dlopen\s*\(/, label: 'native:cffi-load' },
+  // Whole-environment enumeration (`"X" in os.environ` membership tests are not matched)
+  {
+    regex:
+      /\bos\.environ\.(?:items|keys|values|copy)\s*\(|\b(?:dict|list|str|repr|sorted|json\.dumps)\s*\(\s*os\.environ\s*[,)]|\*\*\s*os\.environ\b|\bfor\s+[\w\s,()]+\bin\s+os\.environ\b(?![.[])/,
+    label: 'env:enumerate',
+  },
   // Targeted CI / secret credential access
   { regex: envAccess(CI_NAME), label: 'cred:ci-token' },
   { regex: envAccess(GENERIC_SECRET_NAME), label: 'cred:generic-secret' },

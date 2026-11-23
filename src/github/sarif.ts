@@ -228,9 +228,9 @@ function resultsForPackage(
     seenLabels.add(f.label);
     results.push({
       ruleId: 'lockscan/source-pattern',
-      level: sarifLevel(patternSeverity(f.label)),
+      level: sarifLevel(f.severity ?? patternSeverity(f.label)),
       message: {
-        text: `${pkg.name} (${versionStr}) introduced dangerous pattern \`${f.label}\` (first seen in ${f.file}:${f.line})`,
+        text: `${pkg.name} (${versionStr}) introduced dangerous pattern \`${f.label}\` (first seen in ${f.file}:${f.line})${f.escalation ? `, escalated by ${f.escalation}` : ''}`,
       },
       locations: [loc],
     });

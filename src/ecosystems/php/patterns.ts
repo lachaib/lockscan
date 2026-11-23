@@ -53,6 +53,12 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   { regex: /\bgetenv\s*\(/, label: 'info:getenv' },
   { regex: /\$_ENV\b/, label: 'info:$_ENV' },
   { regex: /\$_SERVER\b/, label: 'info:$_SERVER' },
+  // Whole-environment enumeration
+  {
+    regex:
+      /\bgetenv\s*\(\s*\)|\b(?:json_encode|serialize|print_r|var_export|var_dump|http_build_query|array_keys|implode)\s*\(\s*\$_(?:ENV|SERVER)\s*[,)]|\bforeach\s*\(\s*\$_(?:ENV|SERVER)\s+as\b/,
+    label: 'env:enumerate',
+  },
   // Targeted CI credential access
   { regex: envAccess(CI_NAME), label: 'cred:ci-token' },
   { regex: envAccess(GENERIC_SECRET_NAME), label: 'cred:generic-secret' },

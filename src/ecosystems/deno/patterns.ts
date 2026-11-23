@@ -16,6 +16,7 @@ const DENO_PATTERNS: Pattern[] = [
   { regex: /\bDeno\.remove\s*\(/, label: 'fs:Deno.remove' },
   // Environment access
   { regex: /\bDeno\.env\.(?:get|toObject|has)\s*\(/, label: 'info:Deno.env' },
+  { regex: /\bDeno\.env\.toObject\s*\(/, label: 'env:enumerate' },
   // CI token targeting via Deno.env
   { regex: denoEnvGet(CI_NAME), label: 'cred:ci-token' },
   { regex: denoEnvGet(GENERIC_SECRET_NAME), label: 'cred:generic-secret' },
