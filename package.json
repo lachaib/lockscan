@@ -60,7 +60,7 @@
     "tar": "^7.5.22"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.15",
+    "@biomejs/biome": "2.6.8",
     "@types/node": "25.9.1",
     "husky": "9.1.7",
     "tsup": "8.5.1",
