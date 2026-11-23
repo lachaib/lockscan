@@ -27447,7 +27447,7 @@ var SEVERITY_RANK = {
   moderate: 2,
   low: 1
 };
-var CRITICAL_PATTERNS = /* @__PURE__ */ new Set(["cred:ci-token"]);
+var CRITICAL_PATTERNS = /* @__PURE__ */ new Set(["cred:ci-token", "cred:git-credentials"]);
 var HIGH_PATTERNS = /* @__PURE__ */ new Set([
   "archive:symlink-escape",
   "exec:eval",
@@ -27461,6 +27461,14 @@ var HIGH_PATTERNS = /* @__PURE__ */ new Set([
   "deser:pickle",
   "deser:marshal"
 ]);
+var SOCKET_LABELS = [
+  "net:raw-socket",
+  "net:dns",
+  "net:fsockopen",
+  "net:stream_socket_client",
+  "net:Deno.connect",
+  "net:Deno.connectTls"
+];
 var MODERATE_PATTERNS = /* @__PURE__ */ new Set([
   "archive:symlink",
   "shell:require-child_process",
@@ -27473,7 +27481,10 @@ var MODERATE_PATTERNS = /* @__PURE__ */ new Set([
   "exec:dynamic-require",
   "exec:dynamic-load-path",
   "deser:yaml.load",
-  "deser:generic"
+  "deser:generic",
+  "cred:generic-secret",
+  "fs:git-dir",
+  ...SOCKET_LABELS
 ]);
 var PATTERN_FAMILIES = {
   "dynamic-import": [
@@ -27498,6 +27509,25 @@ var LABEL_TO_FAMILY = /* @__PURE__ */ new Map();
 for (const members of Object.values(PATTERN_FAMILIES)) {
   for (const label of members) LABEL_TO_FAMILY.set(label, members);
 }
+var COMPOUND_EXFIL = "compound:env-exfil";
+var STRONG_OBFUSCATION = /* @__PURE__ */ new Set([
+  "obfusc:eval-decode",
+  "obfusc:fromCharCode",
+  "obfusc:str_rot13",
+  "obfusc:gzinflate",
+  "obfusc:gzuncompress",
+  "obfusc:hex2bin",
+  "exec:dynamic-require",
+  "exec:dynamic-load-path"
+]);
+var WEAK_OBFUSCATION = /* @__PURE__ */ new Set([
+  "obfusc:base64",
+  "obfusc:atob",
+  "obfusc:fromhex",
+  "obfusc:base64_decode"
+]);
+var isNet = (label) => label.startsWith("net:");
+var isCredential = (label) => label.startsWith("cred:") && label !== "cred:generic-secret";
 function patternSeverity(label) {
   if (CRITICAL_PATTERNS.has(label)) return "critical";
   if (HIGH_PATTERNS.has(label)) return "high";
@@ -27549,6 +27579,40 @@ function binaryFindingSeverity(label) {
   if (label === "binary:base64") return "low";
   return "high";
 }
+function countPrefix(findings, match) {
+  return findings.filter((f2) => match(f2.label)).length;
+}
+function compoundSeverity(oldF, newF, delta) {
+  const labels = new Set(delta.map((f2) => f2.label));
+  const netGrew = countPrefix(newF, isNet) > countPrefix(oldF, isNet);
+  if (!netGrew || ![...labels].some(isNet)) return null;
+  const enumerates = labels.has("env:enumerate");
+  const credential = [...labels].some(isCredential);
+  const strongObf = [...labels].some((l) => STRONG_OBFUSCATION.has(l));
+  const weakObf = [...labels].some((l) => WEAK_OBFUSCATION.has(l));
+  if (enumerates && (credential || strongObf || weakObf)) return "critical";
+  if (enumerates || credential || strongObf) return "high";
+  return null;
+}
+function isCompoundMember(label) {
+  return isNet(label) || label === "env:enumerate" || isCredential(label) || STRONG_OBFUSCATION.has(label) || WEAK_OBFUSCATION.has(label);
+}
+function annotateDelta(sf) {
+  const { old: oldF, new: newF, delta } = sf;
+  const oldCount = countByLabel(oldF);
+  const newCount = countByLabel(newF);
+  const compound = compoundSeverity(oldF, newF, delta);
+  return delta.map((f2) => {
+    const own = effectivePatternSeverity(f2.label, oldCount, newCount);
+    const escalated = compound && isCompoundMember(f2.label) && higher(own, compound) !== own;
+    return {
+      ...f2,
+      rule: f2.label,
+      severity: escalated ? compound : own,
+      ...escalated && { escalation: COMPOUND_EXFIL }
+    };
+  });
+}
 function packageMaxSeverity(pkg) {
   let s3 = null;
   for (const v2 of pkg.knownVulns ?? []) {
@@ -27556,11 +27620,8 @@ function packageMaxSeverity(pkg) {
     if (vs2) s3 = higher(s3, vs2);
   }
   if (pkg.securityFindings?.delta.length) {
-    const { old: oldF, new: newF, delta } = pkg.securityFindings;
-    const oldCount = countByLabel(oldF);
-    const newCount = countByLabel(newF);
-    for (const f2 of delta) {
-      s3 = higher(s3, effectivePatternSeverity(f2.label, oldCount, newCount));
+    for (const f2 of annotateDelta(pkg.securityFindings)) {
+      s3 = higher(s3, f2.severity ?? "low");
     }
   }
   for (const f2 of pkg.binaryFindings?.delta ?? []) {
@@ -27612,17 +27673,7 @@ function withSeverity(pkg) {
   if (pkg.error) return pkg;
   const out = { ...pkg, maxSeverity: packageMaxSeverity(pkg) };
   if (pkg.securityFindings) {
-    const { old: oldF, new: newF, delta } = pkg.securityFindings;
-    const oldCount = countByLabel(oldF);
-    const newCount = countByLabel(newF);
-    out.securityFindings = {
-      ...pkg.securityFindings,
-      delta: delta.map((f2) => ({
-        ...f2,
-        rule: f2.label,
-        severity: effectivePatternSeverity(f2.label, oldCount, newCount)
-      }))
-    };
+    out.securityFindings = { ...pkg.securityFindings, delta: annotateDelta(pkg.securityFindings) };
   }
   if (pkg.binaryFindings) {
     out.binaryFindings = {
@@ -27725,6 +27776,8 @@ function buildSignals(pkg) {
   if ((pkg.knownVulns?.length ?? 0) > 3) {
     signals.push(`+${pkg.knownVulns.length - 3} more CVEs`);
   }
+  const escalation = pkg.securityFindings?.delta.find((f2) => f2.escalation)?.escalation;
+  if (escalation) signals.push(escalation);
   for (const f2 of pkg.securityFindings?.delta.slice(0, 3) ?? []) {
     signals.push(f2.label);
   }
@@ -27797,6 +27850,8 @@ function packageSignals(pkg) {
   if ((pkg.knownVulns?.length ?? 0) > 2) {
     signals.push(`+${pkg.knownVulns.length - 2} more CVEs`);
   }
+  const escalation = pkg.securityFindings?.delta.find((f2) => f2.escalation)?.escalation;
+  if (escalation) signals.push(`\`${escalation}\``);
   for (const f2 of pkg.securityFindings?.delta.slice(0, 3) ?? []) {
     signals.push(`\`${f2.label}\``);
   }
@@ -28099,9 +28154,9 @@ function resultsForPackage(pkg, ecosystem, lockfilePath, workspace) {
     seenLabels.add(f2.label);
     results.push({
       ruleId: "lockscan/source-pattern",
-      level: sarifLevel(patternSeverity(f2.label)),
+      level: sarifLevel(f2.severity ?? patternSeverity(f2.label)),
       message: {
-        text: `${pkg.name} (${versionStr}) introduced dangerous pattern \`${f2.label}\` (first seen in ${f2.file}:${f2.line})`
+        text: `${pkg.name} (${versionStr}) introduced dangerous pattern \`${f2.label}\` (first seen in ${f2.file}:${f2.line})${f2.escalation ? `, escalated by ${f2.escalation}` : ""}`
       },
       locations: [loc]
     });
@@ -31490,6 +31545,7 @@ function classifyLink(name, target, relativeToEntry) {
   const resolved = import_node_path11.posix.normalize(import_node_path11.posix.join(base, target.replace(/\\/g, "/")));
   return { name, target, escapes: resolved === ".." || resolved.startsWith("../") };
 }
+var DECLARATION_FILE = /\.d\.[cm]?ts$/;
 var SKIP_DIRS = /* @__PURE__ */ new Set([
   "__pycache__",
   ".git",
@@ -31582,6 +31638,7 @@ function extractZip(data, fileExtensions) {
   for (const entry of zip.getEntries()) {
     if (entry.isDirectory || isZipSymlink(entry)) continue;
     if (!fileExtensions.has((0, import_node_path11.extname)(entry.entryName))) continue;
+    if (DECLARATION_FILE.test(entry.entryName)) continue;
     try {
       files.set(entry.entryName, entry.getData().toString("utf8"));
     } catch {
@@ -31613,7 +31670,7 @@ async function walkDir(baseDir, currentDir, extensions, files, readAs, skipDirs,
       if (!skipDirs.has(entry)) {
         await walkDir(baseDir, fullPath, extensions, files, readAs, skipDirs, accept);
       }
-    } else if (extensions.has((0, import_node_path11.extname)(entry))) {
+    } else if (extensions.has((0, import_node_path11.extname)(entry)) && !DECLARATION_FILE.test(entry)) {
       const rel = (0, import_node_path11.relative)(baseDir, fullPath);
       try {
         const content = await readAs(fullPath);
@@ -33154,14 +33211,56 @@ function computeJsrMetadataDelta(oldMeta, newMeta) {
   };
 }
 
+// src/ecosystems/shared/ci-env.ts
+var CI_ENV_NAMES = [
+  "GITHUB_TOKEN",
+  "GH_TOKEN",
+  "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+  "ACTIONS_ID_TOKEN_REQUEST_URL",
+  "ACTIONS_RUNTIME_TOKEN",
+  "ACTIONS_RUNTIME_URL",
+  "ACTIONS_CACHE_URL",
+  "ACTIONS_RESULTS_URL",
+  "GITLAB_TOKEN",
+  "CI_JOB_TOKEN",
+  "CI_REGISTRY_PASSWORD",
+  "CI_DEPLOY_PASSWORD",
+  "CIRCLE_TOKEN",
+  "SYSTEM_ACCESSTOKEN",
+  "NPM_TOKEN",
+  "NODE_AUTH_TOKEN",
+  "YARN_NPM_AUTH_TOKEN",
+  "PYPI_TOKEN",
+  "TWINE_PASSWORD",
+  "COMPOSER_AUTH",
+  "PACKAGIST_TOKEN",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "GOOGLE_APPLICATION_CREDENTIALS",
+  "AZURE_CLIENT_SECRET",
+  "VERCEL_TOKEN",
+  "CODECOV_TOKEN",
+  "FIREBASE_TOKEN",
+  "HEROKU_API_KEY",
+  "SENTRY_AUTH_TOKEN",
+  "DOCKER_PASSWORD"
+];
+var CI_NAME = `(?:${CI_ENV_NAMES.join("|")})`;
+var GENERIC_SECRET_NAME = `(?!${CI_NAME}(?![\\w$]))[A-Z][A-Z0-9_]*_(?:TOKEN|SECRET|PASSWORD|API_KEY)`;
+
 // src/ecosystems/javascript/patterns.ts
+var envAccess = (name) => new RegExp(
+  `process\\.env(?:\\??\\.${name}(?![\\w$])|\\[\\s*['"\`]${name}['"\`]\\s*\\])|\\{[^}]{0,400}?(?<![\\w$])${name}(?![\\w$])[^}]{0,400}\\}\\s*=\\s*process\\.env\\b`
+);
+var MODULE_REF = `(?:\\brequire\\s*\\(\\s*|\\bimport\\s*\\(\\s*|\\bfrom\\s+|\\bimport\\s+)['"](?:node:)?`;
 var DANGEROUS_PATTERNS = [
   // Code execution
   { regex: /\beval\s*\(/, label: "exec:eval" },
   { regex: /new\s+Function\s*\(/, label: "exec:Function" },
   { regex: /\bvm\.(runIn|createContext|Script\b)/, label: "exec:vm" },
   // Shell execution
-  { regex: /require\s*\(\s*['"]child_process['"]/, label: "shell:require-child_process" },
+  { regex: new RegExp(`${MODULE_REF}child_process['"]`), label: "shell:require-child_process" },
   { regex: /\bexecSync\s*\(/, label: "shell:execSync" },
   { regex: /\bspawnSync\s*\(/, label: "shell:spawnSync" },
   { regex: /\bexecFileSync\s*\(/, label: "shell:execFileSync" },
@@ -33180,7 +33279,15 @@ var DANGEROUS_PATTERNS = [
   { regex: /\\x[0-9a-fA-F]{2}/, label: "obfusc:hex-escape" },
   { regex: /\batob\s*\(/, label: "obfusc:atob" },
   // Network
-  { regex: /require\s*\(\s*['"]https?['"]/, label: "net:http" },
+  { regex: new RegExp(`${MODULE_REF}(?:https?|http2)['"]`), label: "net:http" },
+  {
+    regex: new RegExp(
+      `${MODULE_REF}(?:undici|node-fetch|superagent|needle)['"]|\\bnew\\s+(?:XMLHttpRequest|WebSocket)\\s*\\(`
+    ),
+    label: "net:http-client"
+  },
+  { regex: new RegExp(`${MODULE_REF}(?:net|tls|dgram)['"]`), label: "net:raw-socket" },
+  { regex: new RegExp(`${MODULE_REF}dns(?:/promises)?['"]`), label: "net:dns" },
   { regex: /\bfetch\s*\(/, label: "net:fetch" },
   { regex: /\baxios\b/, label: "net:axios" },
   { regex: /\bgot\s*\(/, label: "net:got" },
@@ -33192,18 +33299,34 @@ var DANGEROUS_PATTERNS = [
   { regex: /\bfs\.promises\.(writeFile|rm|unlink|mkdir)\b/, label: "fs:async-write" },
   // Process / environment
   { regex: /\bprocess\.env\b/, label: "info:process.env" },
-  // Targeted CI credential access (event-stream / ctx / dbus-next pattern)
+  // Whole-environment enumeration (membership tests such as `'X' in process.env` are not matched)
   {
-    regex: /process\.env\.(GITHUB_TOKEN|NPM_TOKEN|NODE_AUTH_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|VERCEL_TOKEN|CODECOV_TOKEN|FIREBASE_TOKEN|HEROKU_API_KEY)/,
-    label: "cred:ci-token"
+    regex: /\bJSON\.stringify\s*\(\s*process\.env\s*[,)]|\bObject\.(?:keys|values|entries|fromEntries|assign)\s*\([^)]{0,80}\bprocess\.env\s*[,)]|\.\.\.\s*process\.env\b(?![.[])|\bfor\s*\([^)]{0,80}\bin\s+process\.env\b(?![.[])/,
+    label: "env:enumerate"
   },
+  // Targeted CI credential access
+  { regex: envAccess(CI_NAME), label: "cred:ci-token" },
+  { regex: envAccess(GENERIC_SECRET_NAME), label: "cred:generic-secret" },
+  // Git credentials persisted by CI checkouts (http.<url>.extraheader, .git-credentials); literals only
+  { regex: /\bextraheader\b|\.git-credentials\b/i, label: "cred:git-credentials" },
+  { regex: /(?<![\w.-])\.git[\\/]|['"`]\.git['"`]/, label: "fs:git-dir" },
   // Prototype pollution (Object.prototype tampering)
   { regex: /__proto__\s*[:[{]/, label: "inject:proto-pollution" },
   { regex: /Object\.defineProperty\s*\(\s*Object\.prototype/, label: "inject:proto-pollution" }
 ];
-var JS_EXTENSIONS = /* @__PURE__ */ new Set([".js", ".mjs", ".cjs"]);
+var JS_EXTENSIONS = /* @__PURE__ */ new Set([
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".jsx",
+  ".ts",
+  ".mts",
+  ".cts",
+  ".tsx"
+]);
 
 // src/ecosystems/deno/patterns.ts
+var denoEnvGet = (name) => new RegExp(`Deno\\.env\\.get\\s*\\(\\s*['"]${name}['"]`);
 var DENO_PATTERNS = [
   // Subprocess execution
   { regex: /\bnew\s+Deno\.Command\s*\(/, label: "exec:Deno.Command" },
@@ -33214,11 +33337,10 @@ var DENO_PATTERNS = [
   { regex: /\bDeno\.remove\s*\(/, label: "fs:Deno.remove" },
   // Environment access
   { regex: /\bDeno\.env\.(?:get|toObject|has)\s*\(/, label: "info:Deno.env" },
+  { regex: /\bDeno\.env\.toObject\s*\(/, label: "env:enumerate" },
   // CI token targeting via Deno.env
-  {
-    regex: /Deno\.env\.get\s*\(\s*['"](?:GITHUB_TOKEN|NPM_TOKEN|NODE_AUTH_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|VERCEL_TOKEN|CODECOV_TOKEN|FIREBASE_TOKEN|HEROKU_API_KEY)['"]/,
-    label: "cred:ci-token"
-  },
+  { regex: denoEnvGet(CI_NAME), label: "cred:ci-token" },
+  { regex: denoEnvGet(GENERIC_SECRET_NAME), label: "cred:generic-secret" },
   // Raw TCP/TLS connections — typical C2 exfiltration channel
   { regex: /\bDeno\.connect\s*\(/, label: "net:Deno.connect" },
   { regex: /\bDeno\.connectTls\s*\(/, label: "net:Deno.connectTls" },
@@ -33231,8 +33353,8 @@ var DENO_PATTERNS = [
   }
 ];
 var DANGEROUS_PATTERNS2 = [...DANGEROUS_PATTERNS, ...DENO_PATTERNS];
-var NPM_EXTENSIONS = /* @__PURE__ */ new Set([".js", ".mjs", ".cjs"]);
-var JSR_EXTENSIONS = /* @__PURE__ */ new Set([".ts", ".tsx", ".js", ".mjs", ".jsx"]);
+var NPM_EXTENSIONS = JS_EXTENSIONS;
+var JSR_EXTENSIONS = /* @__PURE__ */ new Set([...JS_EXTENSIONS]);
 
 // src/ecosystems/deno/index.ts
 async function scanNpmArtifact(data, destDir, keep) {
@@ -33723,6 +33845,7 @@ async function fetchPackagistWithVersions(name, version) {
 }
 
 // src/ecosystems/php/patterns.ts
+var envAccess2 = (name) => new RegExp(`(?:getenv\\s*\\(|\\$_(?:ENV|SERVER)\\s*\\[)\\s*['"]${name}['"]`);
 var DANGEROUS_PATTERNS3 = [
   // Code execution
   { regex: /\beval\s*\(/, label: "exec:eval" },
@@ -33758,9 +33881,10 @@ var DANGEROUS_PATTERNS3 = [
   // Network I/O
   { regex: /\bfsockopen\s*\(/, label: "net:fsockopen" },
   { regex: /\bstream_socket_client\s*\(/, label: "net:stream_socket_client" },
-  { regex: /\bcurl_exec\s*\(/, label: "net:curl_exec" },
+  { regex: /\bcurl_(?:exec|multi_exec|init)\s*\(/, label: "net:curl_exec" },
+  { regex: /\b(?:dns_get_record|gethostbyname|checkdnsrr)\s*\(/, label: "net:dns" },
   // file_get_contents is dual-use; flag when called with a URL-like argument
-  { regex: /\bfile_get_contents\s*\(\s*['"]https?:/, label: "net:file_get_contents-url" },
+  { regex: /\b(?:file_get_contents|fopen)\s*\(\s*['"]https?:/, label: "net:file_get_contents-url" },
   // Filesystem writes / deletes
   { regex: /\bfile_put_contents\s*\(/, label: "fs:file_put_contents" },
   { regex: /\bfwrite\s*\(/, label: "fs:fwrite" },
@@ -33770,11 +33894,17 @@ var DANGEROUS_PATTERNS3 = [
   { regex: /\bgetenv\s*\(/, label: "info:getenv" },
   { regex: /\$_ENV\b/, label: "info:$_ENV" },
   { regex: /\$_SERVER\b/, label: "info:$_SERVER" },
-  // Targeted CI credential access
+  // Whole-environment enumeration
   {
-    regex: /getenv\s*\(\s*['"](?:GITHUB_TOKEN|COMPOSER_AUTH|PACKAGIST_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|HEROKU_API_KEY|CODECOV_TOKEN)['"]/,
-    label: "cred:ci-token"
-  }
+    regex: /\bgetenv\s*\(\s*\)|\b(?:json_encode|serialize|print_r|var_export|var_dump|http_build_query|array_keys|implode)\s*\(\s*\$_(?:ENV|SERVER)\s*[,)]|\bforeach\s*\(\s*\$_(?:ENV|SERVER)\s+as\b/,
+    label: "env:enumerate"
+  },
+  // Targeted CI credential access
+  { regex: envAccess2(CI_NAME), label: "cred:ci-token" },
+  { regex: envAccess2(GENERIC_SECRET_NAME), label: "cred:generic-secret" },
+  // Git credentials persisted by CI checkouts (http.<url>.extraheader, .git-credentials); literals only
+  { regex: /\bextraheader\b|\.git-credentials\b/i, label: "cred:git-credentials" },
+  { regex: /(?<![\w.-])\.git[\\/]|['"`]\.git['"`]/, label: "fs:git-dir" }
 ];
 var PHP_EXTENSIONS = /* @__PURE__ */ new Set([".php", ".phtml", ".php5", ".php7", ".phps"]);
 
@@ -33931,6 +34061,7 @@ var PhpAnalyzer = class {
 var import_node_path15 = require("path");
 
 // src/ecosystems/python/patterns.ts
+var envAccess3 = (name) => new RegExp(`os\\.(?:environ(?:\\.get)?|getenv)\\s*[(\\[]\\s*['"]${name}['"]`);
 var DANGEROUS_PATTERNS4 = [
   // Builtins only: `re.compile(...)` or `model.eval()` are attribute calls, `builtins.eval(...)` is not.
   { regex: /(?<![.\w])(?:_{0,2}builtins_{0,2}\.)?eval\s*\(/, label: "exec:eval" },
@@ -33950,26 +34081,42 @@ var DANGEROUS_PATTERNS4 = [
   { regex: /\bbytes\.fromhex\s*\(/, label: "obfusc:fromhex" },
   { regex: /\\x[0-9a-fA-F]{2}/, label: "obfusc:hex-escape" },
   {
-    regex: /\b(?:import|from)\s+(?:requests|httpx|aiohttp|ftplib|smtplib)\b|(?<![.\w])(?:requests|httpx|aiohttp|ftplib|smtplib)\.\w/,
+    regex: /\b(?:import|from)\s+(?:requests|httpx|aiohttp|ftplib|smtplib|urllib3|urllib\.request|http\.client|websockets?)\b|\bfrom\s+urllib\s+import\s+request\b|(?<![.\w])(?:requests|httpx|aiohttp|ftplib|smtplib|urllib3|urllib\.request|http\.client)\.\w/,
     label: "net:http-lib"
   },
-  { regex: /\bsocket\.(socket|connect|create_connection)\b/, label: "net:raw-socket" },
+  {
+    regex: /\bsocket\.(socket|connect|create_connection)\b|\basyncio\.(?:open_connection|start_server)\b/,
+    label: "net:raw-socket"
+  },
+  {
+    regex: /\bsocket\.(?:gethostbyname(?:_ex)?|getaddrinfo)\b|\bdns\.resolver\b/,
+    label: "net:dns"
+  },
   { regex: /\bopen\s*\([^)]*["']w/, label: "fs:file-write" },
   { regex: /\bos\.(remove|unlink)\s*\(/, label: "fs:file-delete" },
   { regex: /\bshutil\.rmtree\s*\(/, label: "fs:dir-delete" },
   // Native library loading via ctypes / cffi (can bypass Python-level analysis entirely)
   { regex: /\bctypes\.CDLL\s*\(|ctypes\.cdll\.LoadLibrary\s*\(/, label: "native:ctypes-load" },
   { regex: /\bcffi\.FFI\s*\(\)|ffi\.dlopen\s*\(/, label: "native:cffi-load" },
-  // Targeted CI / secret credential access (similar to event-stream pattern but in Python)
+  // Whole-environment enumeration (`"X" in os.environ` membership tests are not matched)
   {
-    regex: /os\.environ(?:\.get)?\s*\(?\s*['"](?:GITHUB_TOKEN|NPM_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|PYPI_TOKEN|TWINE_PASSWORD|CODECOV_TOKEN)/,
-    label: "cred:ci-token"
-  }
+    regex: /\bos\.environ\.(?:items|keys|values|copy)\s*\(|\b(?:dict|list|str|repr|sorted|json\.dumps)\s*\(\s*os\.environ\s*[,)]|\*\*\s*os\.environ\b|\bfor\s+[\w\s,()]{1,80}\bin\s+os\.environ\b(?![.[])/,
+    label: "env:enumerate"
+  },
+  // Targeted CI / secret credential access
+  { regex: envAccess3(CI_NAME), label: "cred:ci-token" },
+  { regex: envAccess3(GENERIC_SECRET_NAME), label: "cred:generic-secret" },
+  // Git credentials persisted by CI checkouts (http.<url>.extraheader, .git-credentials); literals only
+  { regex: /\bextraheader\b|\.git-credentials\b/i, label: "cred:git-credentials" },
+  { regex: /(?<![\w.-])\.git[\\/]|['"`]\.git['"`]/, label: "fs:git-dir" }
 ];
 var STRING_SCOPED_LABELS = /* @__PURE__ */ new Set([
   "obfusc:hex-escape",
   "fs:file-write",
-  "cred:ci-token"
+  "cred:ci-token",
+  "cred:generic-secret",
+  "cred:git-credentials",
+  "fs:git-dir"
 ]);
 var PY_EXTENSIONS = /* @__PURE__ */ new Set([".py"]);
 

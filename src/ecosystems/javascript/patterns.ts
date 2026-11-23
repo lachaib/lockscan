@@ -1,4 +1,14 @@
+import { CI_NAME, GENERIC_SECRET_NAME } from '../shared/ci-env.js';
 import type { Pattern } from '../shared/scan.js';
+
+// `process.env.NAME`, `process.env?.NAME`, `process.env['NAME']` and `const { NAME } = process.env`.
+const envAccess = (name: string): RegExp =>
+  new RegExp(
+    `process\\.env(?:\\??\\.${name}(?![\\w$])|\\[\\s*['"\`]${name}['"\`]\\s*\\])|\\{[^}]{0,400}?(?<![\\w$])${name}(?![\\w$])[^}]{0,400}\\}\\s*=\\s*process\\.env\\b`,
+  );
+
+// Start of a module reference: require('x'), import('x'), `import x from 'x'`, `import 'x'`; an optional `node:` prefix follows.
+const MODULE_REF = `(?:\\brequire\\s*\\(\\s*|\\bimport\\s*\\(\\s*|\\bfrom\\s+|\\bimport\\s+)['"](?:node:)?`;
 
 export const DANGEROUS_PATTERNS: Pattern[] = [
   // Code execution
@@ -6,7 +16,7 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   { regex: /new\s+Function\s*\(/, label: 'exec:Function' },
   { regex: /\bvm\.(runIn|createContext|Script\b)/, label: 'exec:vm' },
   // Shell execution
-  { regex: /require\s*\(\s*['"]child_process['"]/, label: 'shell:require-child_process' },
+  { regex: new RegExp(`${MODULE_REF}child_process['"]`), label: 'shell:require-child_process' },
   { regex: /\bexecSync\s*\(/, label: 'shell:execSync' },
   { regex: /\bspawnSync\s*\(/, label: 'shell:spawnSync' },
   { regex: /\bexecFileSync\s*\(/, label: 'shell:execFileSync' },
@@ -25,7 +35,15 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   { regex: /\\x[0-9a-fA-F]{2}/, label: 'obfusc:hex-escape' },
   { regex: /\batob\s*\(/, label: 'obfusc:atob' },
   // Network
-  { regex: /require\s*\(\s*['"]https?['"]/, label: 'net:http' },
+  { regex: new RegExp(`${MODULE_REF}(?:https?|http2)['"]`), label: 'net:http' },
+  {
+    regex: new RegExp(
+      `${MODULE_REF}(?:undici|node-fetch|superagent|needle)['"]|\\bnew\\s+(?:XMLHttpRequest|WebSocket)\\s*\\(`,
+    ),
+    label: 'net:http-client',
+  },
+  { regex: new RegExp(`${MODULE_REF}(?:net|tls|dgram)['"]`), label: 'net:raw-socket' },
+  { regex: new RegExp(`${MODULE_REF}dns(?:/promises)?['"]`), label: 'net:dns' },
   { regex: /\bfetch\s*\(/, label: 'net:fetch' },
   { regex: /\baxios\b/, label: 'net:axios' },
   { regex: /\bgot\s*\(/, label: 'net:got' },
@@ -37,15 +55,30 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   { regex: /\bfs\.promises\.(writeFile|rm|unlink|mkdir)\b/, label: 'fs:async-write' },
   // Process / environment
   { regex: /\bprocess\.env\b/, label: 'info:process.env' },
-  // Targeted CI credential access (event-stream / ctx / dbus-next pattern)
+  // Whole-environment enumeration (membership tests such as `'X' in process.env` are not matched)
   {
     regex:
-      /process\.env\.(GITHUB_TOKEN|NPM_TOKEN|NODE_AUTH_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|VERCEL_TOKEN|CODECOV_TOKEN|FIREBASE_TOKEN|HEROKU_API_KEY)/,
-    label: 'cred:ci-token',
+      /\bJSON\.stringify\s*\(\s*process\.env\s*[,)]|\bObject\.(?:keys|values|entries|fromEntries|assign)\s*\([^)]{0,80}\bprocess\.env\s*[,)]|\.\.\.\s*process\.env\b(?![.[])|\bfor\s*\([^)]{0,80}\bin\s+process\.env\b(?![.[])/,
+    label: 'env:enumerate',
   },
+  // Targeted CI credential access
+  { regex: envAccess(CI_NAME), label: 'cred:ci-token' },
+  { regex: envAccess(GENERIC_SECRET_NAME), label: 'cred:generic-secret' },
+  // Git credentials persisted by CI checkouts (http.<url>.extraheader, .git-credentials); literals only
+  { regex: /\bextraheader\b|\.git-credentials\b/i, label: 'cred:git-credentials' },
+  { regex: /(?<![\w.-])\.git[\\/]|['"`]\.git['"`]/, label: 'fs:git-dir' },
   // Prototype pollution (Object.prototype tampering)
   { regex: /__proto__\s*[:[{]/, label: 'inject:proto-pollution' },
   { regex: /Object\.defineProperty\s*\(\s*Object\.prototype/, label: 'inject:proto-pollution' },
 ];
 
-export const JS_EXTENSIONS = new Set(['.js', '.mjs', '.cjs']);
+export const JS_EXTENSIONS = new Set([
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.jsx',
+  '.ts',
+  '.mts',
+  '.cts',
+  '.tsx',
+]);

@@ -10,7 +10,7 @@ export const SEVERITY_RANK: Record<Severity, number> = {
 };
 
 // Patterns that directly exfiltrate credentials — treat as critical regardless of context.
-const CRITICAL_PATTERNS = new Set(['cred:ci-token']);
+const CRITICAL_PATTERNS = new Set(['cred:ci-token', 'cred:git-credentials']);
 
 // Patterns that enable arbitrary code execution.
 const HIGH_PATTERNS = new Set([
@@ -27,6 +27,16 @@ const HIGH_PATTERNS = new Set([
   'deser:marshal',
 ]);
 
+// Raw sockets and DNS lookups: rarer than HTTP clients and a typical exfiltration channel.
+const SOCKET_LABELS = [
+  'net:raw-socket',
+  'net:dns',
+  'net:fsockopen',
+  'net:stream_socket_client',
+  'net:Deno.connect',
+  'net:Deno.connectTls',
+];
+
 // Patterns that enable shell execution or unsafe deserialization.
 const MODERATE_PATTERNS = new Set([
   'archive:symlink',
@@ -41,6 +51,9 @@ const MODERATE_PATTERNS = new Set([
   'exec:dynamic-load-path',
   'deser:yaml.load',
   'deser:generic',
+  'cred:generic-secret',
+  'fs:git-dir',
+  ...SOCKET_LABELS,
 ]);
 
 // Groups of labels that represent the same underlying capability. When the family's
@@ -70,6 +83,35 @@ const LABEL_TO_FAMILY = new Map<string, string[]>();
 for (const members of Object.values(PATTERN_FAMILIES)) {
   for (const label of members) LABEL_TO_FAMILY.set(label, members);
 }
+
+/** Rule id attached to findings escalated because enumeration, credential or evasion signals appear with network I/O. */
+export const COMPOUND_EXFIL = 'compound:env-exfil';
+
+// Techniques that hide what code does: enough on their own, together with network I/O, to escalate.
+const STRONG_OBFUSCATION = new Set([
+  'obfusc:eval-decode',
+  'obfusc:fromCharCode',
+  'obfusc:str_rot13',
+  'obfusc:gzinflate',
+  'obfusc:gzuncompress',
+  'obfusc:hex2bin',
+  'exec:dynamic-require',
+  'exec:dynamic-load-path',
+]);
+
+// Common in benign code (auth headers, data blobs): only counts when the environment is also enumerated.
+const WEAK_OBFUSCATION = new Set([
+  'obfusc:base64',
+  'obfusc:atob',
+  'obfusc:fromhex',
+  'obfusc:base64_decode',
+]);
+
+const isNet = (label: string): boolean => label.startsWith('net:');
+
+// `cred:generic-secret` is excluded: a configured API token read next to an HTTP call is what ordinary SDKs do.
+const isCredential = (label: string): boolean =>
+  label.startsWith('cred:') && label !== 'cred:generic-secret';
 
 export function patternSeverity(label: string): Severity {
   if (CRITICAL_PATTERNS.has(label)) return 'critical';
@@ -147,6 +189,62 @@ function binaryFindingSeverity(label: string): Severity {
   return 'high'; // unknown label — conservative fallback
 }
 
+function countPrefix(findings: SecurityFinding[], match: (label: string) => boolean): number {
+  return findings.filter((f) => match(f.label)).length;
+}
+
+/**
+ * Escalation for a new version that adds network I/O together with environment enumeration,
+ * credential access or evasion. Network use must have grown, so swapping one client for another is ignored.
+ */
+function compoundSeverity(
+  oldF: SecurityFinding[],
+  newF: SecurityFinding[],
+  delta: SecurityFinding[],
+): Severity | null {
+  const labels = new Set(delta.map((f) => f.label));
+  const netGrew = countPrefix(newF, isNet) > countPrefix(oldF, isNet);
+  if (!netGrew || ![...labels].some(isNet)) return null;
+
+  const enumerates = labels.has('env:enumerate');
+  const credential = [...labels].some(isCredential);
+  const strongObf = [...labels].some((l) => STRONG_OBFUSCATION.has(l));
+  const weakObf = [...labels].some((l) => WEAK_OBFUSCATION.has(l));
+
+  if (enumerates && (credential || strongObf || weakObf)) return 'critical';
+  if (enumerates || credential || strongObf) return 'high';
+  return null;
+}
+
+function isCompoundMember(label: string): boolean {
+  return (
+    isNet(label) ||
+    label === 'env:enumerate' ||
+    isCredential(label) ||
+    STRONG_OBFUSCATION.has(label) ||
+    WEAK_OBFUSCATION.has(label)
+  );
+}
+
+/** Delta findings with their effective severity (family downgrade, then compound escalation). */
+function annotateDelta(sf: NonNullable<PackageAnalysis['securityFindings']>): SecurityFinding[] {
+  const { old: oldF, new: newF, delta } = sf;
+  const oldCount = countByLabel(oldF);
+  const newCount = countByLabel(newF);
+  const compound = compoundSeverity(oldF, newF, delta);
+
+  return delta.map((f) => {
+    const own = effectivePatternSeverity(f.label, oldCount, newCount);
+    const escalated = compound && isCompoundMember(f.label) && higher(own, compound) !== own;
+    return {
+      ...f,
+      rule: f.label,
+      severity: escalated ? compound : own,
+      ...(escalated && { escalation: COMPOUND_EXFIL }),
+    };
+  });
+}
+
 export function packageMaxSeverity(pkg: PackageAnalysis): Severity | null {
   let s: Severity | null = null;
 
@@ -156,11 +254,8 @@ export function packageMaxSeverity(pkg: PackageAnalysis): Severity | null {
   }
 
   if (pkg.securityFindings?.delta.length) {
-    const { old: oldF, new: newF, delta } = pkg.securityFindings;
-    const oldCount = countByLabel(oldF);
-    const newCount = countByLabel(newF);
-    for (const f of delta) {
-      s = higher(s, effectivePatternSeverity(f.label, oldCount, newCount));
+    for (const f of annotateDelta(pkg.securityFindings)) {
+      s = higher(s, f.severity ?? 'low');
     }
   }
 
@@ -227,17 +322,7 @@ export function withSeverity(pkg: PackageAnalysis): PackageAnalysis {
   const out: PackageAnalysis = { ...pkg, maxSeverity: packageMaxSeverity(pkg) };
 
   if (pkg.securityFindings) {
-    const { old: oldF, new: newF, delta } = pkg.securityFindings;
-    const oldCount = countByLabel(oldF);
-    const newCount = countByLabel(newF);
-    out.securityFindings = {
-      ...pkg.securityFindings,
-      delta: delta.map((f) => ({
-        ...f,
-        rule: f.label,
-        severity: effectivePatternSeverity(f.label, oldCount, newCount),
-      })),
-    };
+    out.securityFindings = { ...pkg.securityFindings, delta: annotateDelta(pkg.securityFindings) };
   }
 
   if (pkg.binaryFindings) {

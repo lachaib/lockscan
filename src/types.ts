@@ -106,6 +106,8 @@ export interface SecurityFinding {
   rule?: string;
   /** Severity of this finding in context (family downgrade applied). Set on delta findings. */
   severity?: Severity;
+  /** Id of the compound rule that raised `severity` above the label's own level. Set on delta findings. */
+  escalation?: string;
 }
 
 export interface ArtifactInfo {

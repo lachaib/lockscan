@@ -22,6 +22,9 @@ function classifyLink(name: string, target: string, relativeToEntry: boolean): A
   return { name, target, escapes: resolved === '..' || resolved.startsWith('../') };
 }
 
+/** TypeScript declaration files hold types only and are never scanned. */
+const DECLARATION_FILE = /\.d\.[cm]?ts$/;
+
 const SKIP_DIRS = new Set([
   '__pycache__',
   '.git',
@@ -164,6 +167,7 @@ export function extractZip(data: Buffer, fileExtensions: Set<string>): FileMap {
   for (const entry of zip.getEntries()) {
     if (entry.isDirectory || isZipSymlink(entry)) continue;
     if (!fileExtensions.has(extname(entry.entryName))) continue;
+    if (DECLARATION_FILE.test(entry.entryName)) continue;
     try {
       files.set(entry.entryName, entry.getData().toString('utf8'));
     } catch {
@@ -208,7 +212,7 @@ async function walkDir<T>(
       if (!skipDirs.has(entry)) {
         await walkDir(baseDir, fullPath, extensions, files, readAs, skipDirs, accept);
       }
-    } else if (extensions.has(extname(entry))) {
+    } else if (extensions.has(extname(entry)) && !DECLARATION_FILE.test(entry)) {
       const rel = relative(baseDir, fullPath);
       try {
         const content = await readAs(fullPath);

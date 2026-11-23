@@ -1,5 +1,9 @@
-import { DANGEROUS_PATTERNS as JS_PATTERNS } from '../javascript/patterns.js';
+import { JS_EXTENSIONS, DANGEROUS_PATTERNS as JS_PATTERNS } from '../javascript/patterns.js';
+import { CI_NAME, GENERIC_SECRET_NAME } from '../shared/ci-env.js';
 import type { Pattern } from '../shared/scan.js';
+
+const denoEnvGet = (name: string): RegExp =>
+  new RegExp(`Deno\\.env\\.get\\s*\\(\\s*['"]${name}['"]`);
 
 // Deno native APIs not covered by the JS pattern set
 const DENO_PATTERNS: Pattern[] = [
@@ -12,12 +16,10 @@ const DENO_PATTERNS: Pattern[] = [
   { regex: /\bDeno\.remove\s*\(/, label: 'fs:Deno.remove' },
   // Environment access
   { regex: /\bDeno\.env\.(?:get|toObject|has)\s*\(/, label: 'info:Deno.env' },
+  { regex: /\bDeno\.env\.toObject\s*\(/, label: 'env:enumerate' },
   // CI token targeting via Deno.env
-  {
-    regex:
-      /Deno\.env\.get\s*\(\s*['"](?:GITHUB_TOKEN|NPM_TOKEN|NODE_AUTH_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|VERCEL_TOKEN|CODECOV_TOKEN|FIREBASE_TOKEN|HEROKU_API_KEY)['"]/,
-    label: 'cred:ci-token',
-  },
+  { regex: denoEnvGet(CI_NAME), label: 'cred:ci-token' },
+  { regex: denoEnvGet(GENERIC_SECRET_NAME), label: 'cred:generic-secret' },
   // Raw TCP/TLS connections — typical C2 exfiltration channel
   { regex: /\bDeno\.connect\s*\(/, label: 'net:Deno.connect' },
   { regex: /\bDeno\.connectTls\s*\(/, label: 'net:Deno.connectTls' },
@@ -35,8 +37,8 @@ const DENO_PATTERNS: Pattern[] = [
 // they simply won't match — so one unified set keeps the logic simple.
 export const DANGEROUS_PATTERNS: Pattern[] = [...JS_PATTERNS, ...DENO_PATTERNS];
 
-// npm: packages ship compiled JS, same extensions as the JS ecosystem.
-export const NPM_EXTENSIONS = new Set(['.js', '.mjs', '.cjs']);
+// npm: packages use the same extensions as the JS ecosystem.
+export const NPM_EXTENSIONS = JS_EXTENSIONS;
 
 // jsr: packages are TypeScript source; also include .js/.mjs for generated output.
-export const JSR_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.mjs', '.jsx']);
+export const JSR_EXTENSIONS = new Set([...JS_EXTENSIONS]);

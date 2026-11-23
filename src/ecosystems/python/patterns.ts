@@ -1,4 +1,9 @@
+import { CI_NAME, GENERIC_SECRET_NAME } from '../shared/ci-env.js';
 import type { Pattern } from '../shared/scan.js';
+
+// `os.environ["NAME"]`, `os.environ.get("NAME")` and `os.getenv("NAME")`.
+const envAccess = (name: string): RegExp =>
+  new RegExp(`os\\.(?:environ(?:\\.get)?|getenv)\\s*[(\\[]\\s*['"]${name}['"]`);
 
 export const DANGEROUS_PATTERNS: Pattern[] = [
   // Builtins only: `re.compile(...)` or `model.eval()` are attribute calls, `builtins.eval(...)` is not.
@@ -20,22 +25,36 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   { regex: /\\x[0-9a-fA-F]{2}/, label: 'obfusc:hex-escape' },
   {
     regex:
-      /\b(?:import|from)\s+(?:requests|httpx|aiohttp|ftplib|smtplib)\b|(?<![.\w])(?:requests|httpx|aiohttp|ftplib|smtplib)\.\w/,
+      /\b(?:import|from)\s+(?:requests|httpx|aiohttp|ftplib|smtplib|urllib3|urllib\.request|http\.client|websockets?)\b|\bfrom\s+urllib\s+import\s+request\b|(?<![.\w])(?:requests|httpx|aiohttp|ftplib|smtplib|urllib3|urllib\.request|http\.client)\.\w/,
     label: 'net:http-lib',
   },
-  { regex: /\bsocket\.(socket|connect|create_connection)\b/, label: 'net:raw-socket' },
+  {
+    regex:
+      /\bsocket\.(socket|connect|create_connection)\b|\basyncio\.(?:open_connection|start_server)\b/,
+    label: 'net:raw-socket',
+  },
+  {
+    regex: /\bsocket\.(?:gethostbyname(?:_ex)?|getaddrinfo)\b|\bdns\.resolver\b/,
+    label: 'net:dns',
+  },
   { regex: /\bopen\s*\([^)]*["']w/, label: 'fs:file-write' },
   { regex: /\bos\.(remove|unlink)\s*\(/, label: 'fs:file-delete' },
   { regex: /\bshutil\.rmtree\s*\(/, label: 'fs:dir-delete' },
   // Native library loading via ctypes / cffi (can bypass Python-level analysis entirely)
   { regex: /\bctypes\.CDLL\s*\(|ctypes\.cdll\.LoadLibrary\s*\(/, label: 'native:ctypes-load' },
   { regex: /\bcffi\.FFI\s*\(\)|ffi\.dlopen\s*\(/, label: 'native:cffi-load' },
-  // Targeted CI / secret credential access (similar to event-stream pattern but in Python)
+  // Whole-environment enumeration (`"X" in os.environ` membership tests are not matched)
   {
     regex:
-      /os\.environ(?:\.get)?\s*\(?\s*['"](?:GITHUB_TOKEN|NPM_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|PYPI_TOKEN|TWINE_PASSWORD|CODECOV_TOKEN)/,
-    label: 'cred:ci-token',
+      /\bos\.environ\.(?:items|keys|values|copy)\s*\(|\b(?:dict|list|str|repr|sorted|json\.dumps)\s*\(\s*os\.environ\s*[,)]|\*\*\s*os\.environ\b|\bfor\s+[\w\s,()]{1,80}\bin\s+os\.environ\b(?![.[])/,
+    label: 'env:enumerate',
   },
+  // Targeted CI / secret credential access
+  { regex: envAccess(CI_NAME), label: 'cred:ci-token' },
+  { regex: envAccess(GENERIC_SECRET_NAME), label: 'cred:generic-secret' },
+  // Git credentials persisted by CI checkouts (http.<url>.extraheader, .git-credentials); literals only
+  { regex: /\bextraheader\b|\.git-credentials\b/i, label: 'cred:git-credentials' },
+  { regex: /(?<![\w.-])\.git[\\/]|['"`]\.git['"`]/, label: 'fs:git-dir' },
 ];
 
 /** Labels whose evidence is a string literal; they run on a view that keeps short strings. */
@@ -43,6 +62,9 @@ export const STRING_SCOPED_LABELS = new Set([
   'obfusc:hex-escape',
   'fs:file-write',
   'cred:ci-token',
+  'cred:generic-secret',
+  'cred:git-credentials',
+  'fs:git-dir',
 ]);
 
 export const PY_EXTENSIONS = new Set(['.py']);

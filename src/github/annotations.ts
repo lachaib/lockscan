@@ -133,6 +133,8 @@ function buildSignals(pkg: import('../types.js').PackageAnalysis): string[] {
   if ((pkg.knownVulns?.length ?? 0) > 3) {
     signals.push(`+${pkg.knownVulns!.length - 3} more CVEs`);
   }
+  const escalation = pkg.securityFindings?.delta.find((f) => f.escalation)?.escalation;
+  if (escalation) signals.push(escalation);
   for (const f of pkg.securityFindings?.delta.slice(0, 3) ?? []) {
     signals.push(f.label);
   }

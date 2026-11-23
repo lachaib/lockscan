@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { withSeverity } from '../../src/github/severity.js';
+import { patternSeverity, withSeverity } from '../../src/github/severity.js';
 import type { PackageAnalysis } from '../../src/types.js';
 
 const base: PackageAnalysis = {
@@ -76,5 +76,32 @@ describe('report severity summary', () => {
       moderate: 0,
       low: 0,
     });
+  });
+});
+
+describe('patternSeverity — credential labels', () => {
+  it('ci-token is critical and generic-secret is moderate', () => {
+    expect(patternSeverity('cred:ci-token')).toBe('critical');
+    expect(patternSeverity('cred:generic-secret')).toBe('moderate');
+  });
+});
+
+describe('network severity', () => {
+  it('keeps HTTP-level labels low and raises sockets and DNS to moderate', () => {
+    for (const l of ['net:http', 'net:http-client', 'net:fetch', 'net:axios', 'net:http-lib']) {
+      expect(patternSeverity(l)).toBe('low');
+    }
+    for (const l of ['net:raw-socket', 'net:dns', 'net:Deno.connect', 'net:fsockopen']) {
+      expect(patternSeverity(l)).toBe('moderate');
+    }
+  });
+
+  it('keeps a lone socket finding moderate', () => {
+    const f = { file: 'a.js', line: 1, label: 'net:raw-socket' };
+    const p = withSeverity({
+      ...base,
+      securityFindings: { old: [], new: [f], delta: [f], platformDivergence: false },
+    });
+    expect(p.securityFindings?.delta[0].severity).toBe('moderate');
   });
 });

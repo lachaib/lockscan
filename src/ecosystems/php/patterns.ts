@@ -1,4 +1,9 @@
+import { CI_NAME, GENERIC_SECRET_NAME } from '../shared/ci-env.js';
 import type { Pattern } from '../shared/scan.js';
+
+// `getenv('NAME')`, `$_ENV['NAME']` and `$_SERVER['NAME']`.
+const envAccess = (name: string): RegExp =>
+  new RegExp(`(?:getenv\\s*\\(|\\$_(?:ENV|SERVER)\\s*\\[)\\s*['"]${name}['"]`);
 
 export const DANGEROUS_PATTERNS: Pattern[] = [
   // Code execution
@@ -35,9 +40,10 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   // Network I/O
   { regex: /\bfsockopen\s*\(/, label: 'net:fsockopen' },
   { regex: /\bstream_socket_client\s*\(/, label: 'net:stream_socket_client' },
-  { regex: /\bcurl_exec\s*\(/, label: 'net:curl_exec' },
+  { regex: /\bcurl_(?:exec|multi_exec|init)\s*\(/, label: 'net:curl_exec' },
+  { regex: /\b(?:dns_get_record|gethostbyname|checkdnsrr)\s*\(/, label: 'net:dns' },
   // file_get_contents is dual-use; flag when called with a URL-like argument
-  { regex: /\bfile_get_contents\s*\(\s*['"]https?:/, label: 'net:file_get_contents-url' },
+  { regex: /\b(?:file_get_contents|fopen)\s*\(\s*['"]https?:/, label: 'net:file_get_contents-url' },
   // Filesystem writes / deletes
   { regex: /\bfile_put_contents\s*\(/, label: 'fs:file_put_contents' },
   { regex: /\bfwrite\s*\(/, label: 'fs:fwrite' },
@@ -47,12 +53,18 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   { regex: /\bgetenv\s*\(/, label: 'info:getenv' },
   { regex: /\$_ENV\b/, label: 'info:$_ENV' },
   { regex: /\$_SERVER\b/, label: 'info:$_SERVER' },
-  // Targeted CI credential access
+  // Whole-environment enumeration
   {
     regex:
-      /getenv\s*\(\s*['"](?:GITHUB_TOKEN|COMPOSER_AUTH|PACKAGIST_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|HEROKU_API_KEY|CODECOV_TOKEN)['"]/,
-    label: 'cred:ci-token',
+      /\bgetenv\s*\(\s*\)|\b(?:json_encode|serialize|print_r|var_export|var_dump|http_build_query|array_keys|implode)\s*\(\s*\$_(?:ENV|SERVER)\s*[,)]|\bforeach\s*\(\s*\$_(?:ENV|SERVER)\s+as\b/,
+    label: 'env:enumerate',
   },
+  // Targeted CI credential access
+  { regex: envAccess(CI_NAME), label: 'cred:ci-token' },
+  { regex: envAccess(GENERIC_SECRET_NAME), label: 'cred:generic-secret' },
+  // Git credentials persisted by CI checkouts (http.<url>.extraheader, .git-credentials); literals only
+  { regex: /\bextraheader\b|\.git-credentials\b/i, label: 'cred:git-credentials' },
+  { regex: /(?<![\w.-])\.git[\\/]|['"`]\.git['"`]/, label: 'fs:git-dir' },
 ];
 
 export const PHP_EXTENSIONS = new Set(['.php', '.phtml', '.php5', '.php7', '.phps']);
