@@ -27503,8 +27503,7 @@ var PATTERN_FAMILIES = {
     "shell:execFileSync",
     "shell:require-child_process"
   ],
-  deser: ["deser:pickle", "deser:marshal", "deser:yaml.load", "deser:generic"],
-  socket: SOCKET_LABELS
+  deser: ["deser:pickle", "deser:marshal", "deser:yaml.load", "deser:generic"]
 };
 var LABEL_TO_FAMILY = /* @__PURE__ */ new Map();
 for (const members of Object.values(PATTERN_FAMILIES)) {
@@ -33252,7 +33251,7 @@ var GENERIC_SECRET_NAME = `(?!${CI_NAME}(?![\\w$]))[A-Z][A-Z0-9_]*_(?:TOKEN|SECR
 
 // src/ecosystems/javascript/patterns.ts
 var envAccess = (name) => new RegExp(
-  `process\\.env(?:\\.${name}(?![\\w$])|\\[\\s*['"\`]${name}['"\`]\\s*\\])|\\{[^}]*?(?<![\\w$])${name}(?![\\w$])[^}]*\\}\\s*=\\s*process\\.env\\b`
+  `process\\.env(?:\\??\\.${name}(?![\\w$])|\\[\\s*['"\`]${name}['"\`]\\s*\\])|\\{[^}]{0,400}?(?<![\\w$])${name}(?![\\w$])[^}]{0,400}\\}\\s*=\\s*process\\.env\\b`
 );
 var MODULE_REF = `(?:\\brequire\\s*\\(\\s*|\\bimport\\s*\\(\\s*|\\bfrom\\s+|\\bimport\\s+)['"](?:node:)?`;
 var DANGEROUS_PATTERNS = [
@@ -33302,7 +33301,7 @@ var DANGEROUS_PATTERNS = [
   { regex: /\bprocess\.env\b/, label: "info:process.env" },
   // Whole-environment enumeration (membership tests such as `'X' in process.env` are not matched)
   {
-    regex: /\bJSON\.stringify\s*\(\s*process\.env\s*[,)]|\bObject\.(?:keys|values|entries|fromEntries|assign)\s*\([^)]*\bprocess\.env\s*[,)]|\.\.\.\s*process\.env\b(?![.[])|\bfor\s*\([^)]*\bin\s+process\.env\b(?![.[])/,
+    regex: /\bJSON\.stringify\s*\(\s*process\.env\s*[,)]|\bObject\.(?:keys|values|entries|fromEntries|assign)\s*\([^)]{0,80}\bprocess\.env\s*[,)]|\.\.\.\s*process\.env\b(?![.[])|\bfor\s*\([^)]{0,80}\bin\s+process\.env\b(?![.[])/,
     label: "env:enumerate"
   },
   // Targeted CI credential access
@@ -34101,7 +34100,7 @@ var DANGEROUS_PATTERNS4 = [
   { regex: /\bcffi\.FFI\s*\(\)|ffi\.dlopen\s*\(/, label: "native:cffi-load" },
   // Whole-environment enumeration (`"X" in os.environ` membership tests are not matched)
   {
-    regex: /\bos\.environ\.(?:items|keys|values|copy)\s*\(|\b(?:dict|list|str|repr|sorted|json\.dumps)\s*\(\s*os\.environ\s*[,)]|\*\*\s*os\.environ\b|\bfor\s+[\w\s,()]+\bin\s+os\.environ\b(?![.[])/,
+    regex: /\bos\.environ\.(?:items|keys|values|copy)\s*\(|\b(?:dict|list|str|repr|sorted|json\.dumps)\s*\(\s*os\.environ\s*[,)]|\*\*\s*os\.environ\b|\bfor\s+[\w\s,()]{1,80}\bin\s+os\.environ\b(?![.[])/,
     label: "env:enumerate"
   },
   // Targeted CI / secret credential access

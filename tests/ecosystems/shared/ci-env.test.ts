@@ -38,6 +38,10 @@ describe('cred:ci-token — variable list', () => {
 });
 
 describe('cred:ci-token — access forms', () => {
+  it('JS: optional chaining', () => {
+    expect(labels('a.js', 'process.env?.GH_TOKEN', JS)).toContain('cred:ci-token');
+  });
+
   it('JS: bracket access with each quote style', () => {
     for (const q of ["'", '"', '`']) {
       expect(labels('a.js', `process.env[${q}GH_TOKEN${q}]`, JS)).toContain('cred:ci-token');

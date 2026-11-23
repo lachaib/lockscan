@@ -171,3 +171,18 @@ describe('env:enumerate patterns', () => {
     },
   );
 });
+
+describe('pattern scan cost on adversarial input', () => {
+  it('stays fast on repeated unterminated constructs', () => {
+    const inputs = [
+      'Object.keys('.repeat(20000),
+      'Object.assign({}, '.repeat(20000),
+      'for ('.repeat(20000),
+      '{ A, '.repeat(20000),
+    ];
+    const start = performance.now();
+    for (const text of inputs) scanPatterns(new Map([['a.js', text]]), JS);
+    scanPythonPatterns(new Map([['a.py', 'for '.repeat(20000)]]));
+    expect(performance.now() - start).toBeLessThan(2000);
+  });
+});

@@ -96,18 +96,12 @@ describe('network severity', () => {
     }
   });
 
-  it('downgrades a socket finding to low when the socket family did not grow', () => {
+  it('keeps a lone socket finding moderate', () => {
     const f = { file: 'a.js', line: 1, label: 'net:raw-socket' };
-    const g = { file: 'b.js', line: 1, label: 'net:dns' };
-    const grown = withSeverity({
+    const p = withSeverity({
       ...base,
-      securityFindings: { old: [], new: [f, g, g, g], delta: [f], platformDivergence: false },
+      securityFindings: { old: [], new: [f], delta: [f], platformDivergence: false },
     });
-    const lateral = withSeverity({
-      ...base,
-      securityFindings: { old: [g], new: [f], delta: [f], platformDivergence: false },
-    });
-    expect(grown.securityFindings?.delta[0].severity).toBe('moderate');
-    expect(lateral.securityFindings?.delta[0].severity).toBe('low');
+    expect(p.securityFindings?.delta[0].severity).toBe('moderate');
   });
 });

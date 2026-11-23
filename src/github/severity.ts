@@ -77,7 +77,6 @@ const PATTERN_FAMILIES: Record<string, string[]> = {
     'shell:require-child_process',
   ],
   deser: ['deser:pickle', 'deser:marshal', 'deser:yaml.load', 'deser:generic'],
-  socket: SOCKET_LABELS,
 };
 
 const LABEL_TO_FAMILY = new Map<string, string[]>();

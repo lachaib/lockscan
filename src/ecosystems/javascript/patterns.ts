@@ -1,10 +1,10 @@
 import { CI_NAME, GENERIC_SECRET_NAME } from '../shared/ci-env.js';
 import type { Pattern } from '../shared/scan.js';
 
-// `process.env.NAME`, `process.env['NAME']` and `const { NAME } = process.env`.
+// `process.env.NAME`, `process.env?.NAME`, `process.env['NAME']` and `const { NAME } = process.env`.
 const envAccess = (name: string): RegExp =>
   new RegExp(
-    `process\\.env(?:\\.${name}(?![\\w$])|\\[\\s*['"\`]${name}['"\`]\\s*\\])|\\{[^}]*?(?<![\\w$])${name}(?![\\w$])[^}]*\\}\\s*=\\s*process\\.env\\b`,
+    `process\\.env(?:\\??\\.${name}(?![\\w$])|\\[\\s*['"\`]${name}['"\`]\\s*\\])|\\{[^}]{0,400}?(?<![\\w$])${name}(?![\\w$])[^}]{0,400}\\}\\s*=\\s*process\\.env\\b`,
   );
 
 // Start of a module reference: require('x'), import('x'), `import x from 'x'`, `import 'x'`; an optional `node:` prefix follows.
@@ -58,7 +58,7 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   // Whole-environment enumeration (membership tests such as `'X' in process.env` are not matched)
   {
     regex:
-      /\bJSON\.stringify\s*\(\s*process\.env\s*[,)]|\bObject\.(?:keys|values|entries|fromEntries|assign)\s*\([^)]*\bprocess\.env\s*[,)]|\.\.\.\s*process\.env\b(?![.[])|\bfor\s*\([^)]*\bin\s+process\.env\b(?![.[])/,
+      /\bJSON\.stringify\s*\(\s*process\.env\s*[,)]|\bObject\.(?:keys|values|entries|fromEntries|assign)\s*\([^)]{0,80}\bprocess\.env\s*[,)]|\.\.\.\s*process\.env\b(?![.[])|\bfor\s*\([^)]{0,80}\bin\s+process\.env\b(?![.[])/,
     label: 'env:enumerate',
   },
   // Targeted CI credential access
