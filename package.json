@@ -54,17 +54,17 @@
     "@actions/core": "^3.0.1",
     "@actions/github": "^9.1.1",
     "adm-zip": "^0.6.1",
-    "commander": "14.0.3",
+    "commander": "15.1.0",
     "diff": "^9.0.0",
-    "lockdelta": "^0.1.10",
-    "tar": "^7.5.22"
+    "lockdelta": "^0.1.11",
+    "tar": "^7.5.23"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.15",
-    "@types/node": "25.9.1",
+    "@biomejs/biome": "2.6.8",
+    "@types/node": "26.6.6",
     "husky": "9.1.7",
-    "tsup": "8.5.1",
+    "tsup": "9.0.0",
     "typescript": "6.0.3",
-    "vitest": "4.1.7"
+    "vitest": "5.1.1"
   }
 }
