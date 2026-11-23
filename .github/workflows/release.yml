@@ -25,7 +25,7 @@ jobs:
           echo "major_tag=v${MAJOR_NUM}"                     >> "$GITHUB_OUTPUT"
           echo "minor_tag=v${MAJOR_NUM}.${MINOR_NUM}"        >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: refs/heads/main
           fetch-depth: 0
