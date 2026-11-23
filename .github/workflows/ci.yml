@@ -5,16 +5,50 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
+  dependency-scan:
+    name: Dependency scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      CAN_COMMENT: ${{ github.event_name == 'pull_request' && github.actor != 'dependabot[bot]' && github.event.pull_request.head.repo.full_name == github.repository }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Diff dependencies
+        id: lockdelta
+        uses: lachaib/lockdelta@v0.1.10
+        with:
+          pr-number: ${{ github.event.pull_request.number }}
+          json-to-file: lockdelta.json
+          post-comment: ${{ env.CAN_COMMENT == 'true' && 'if-changed' || 'false' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - uses: lachaib/lockscan@v0.3.0
+        with:
+          lockdelta-output: lockdelta.json
+          fail-on: critical
+          post-comment: ${{ env.CAN_COMMENT == 'true' && 'if-findings' || 'false' }}
+
   test:
     name: Test
+    needs: dependency-scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: 'pnpm'
