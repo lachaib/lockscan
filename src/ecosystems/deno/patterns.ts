@@ -1,4 +1,4 @@
-import { DANGEROUS_PATTERNS as JS_PATTERNS } from '../javascript/patterns.js';
+import { JS_EXTENSIONS, DANGEROUS_PATTERNS as JS_PATTERNS } from '../javascript/patterns.js';
 import { CI_NAME, GENERIC_SECRET_NAME } from '../shared/ci-env.js';
 import type { Pattern } from '../shared/scan.js';
 
@@ -36,8 +36,8 @@ const DENO_PATTERNS: Pattern[] = [
 // they simply won't match — so one unified set keeps the logic simple.
 export const DANGEROUS_PATTERNS: Pattern[] = [...JS_PATTERNS, ...DENO_PATTERNS];
 
-// npm: packages ship compiled JS, same extensions as the JS ecosystem.
-export const NPM_EXTENSIONS = new Set(['.js', '.mjs', '.cjs']);
+// npm: packages use the same extensions as the JS ecosystem.
+export const NPM_EXTENSIONS = JS_EXTENSIONS;
 
 // jsr: packages are TypeScript source; also include .js/.mjs for generated output.
-export const JSR_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.mjs', '.jsx']);
+export const JSR_EXTENSIONS = new Set([...JS_EXTENSIONS]);

@@ -7,13 +7,16 @@ const envAccess = (name: string): RegExp =>
     `process\\.env(?:\\.${name}(?![\\w$])|\\[\\s*['"\`]${name}['"\`]\\s*\\])|\\{[^}]*?(?<![\\w$])${name}(?![\\w$])[^}]*\\}\\s*=\\s*process\\.env\\b`,
   );
 
+// Start of a module reference: require('x'), import('x'), `import x from 'x'`, `import 'x'`; an optional `node:` prefix follows.
+const MODULE_REF = `(?:\\brequire\\s*\\(\\s*|\\bimport\\s*\\(\\s*|\\bfrom\\s+|\\bimport\\s+)['"](?:node:)?`;
+
 export const DANGEROUS_PATTERNS: Pattern[] = [
   // Code execution
   { regex: /\beval\s*\(/, label: 'exec:eval' },
   { regex: /new\s+Function\s*\(/, label: 'exec:Function' },
   { regex: /\bvm\.(runIn|createContext|Script\b)/, label: 'exec:vm' },
   // Shell execution
-  { regex: /require\s*\(\s*['"]child_process['"]/, label: 'shell:require-child_process' },
+  { regex: new RegExp(`${MODULE_REF}child_process['"]`), label: 'shell:require-child_process' },
   { regex: /\bexecSync\s*\(/, label: 'shell:execSync' },
   { regex: /\bspawnSync\s*\(/, label: 'shell:spawnSync' },
   { regex: /\bexecFileSync\s*\(/, label: 'shell:execFileSync' },
@@ -52,4 +55,13 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   { regex: /Object\.defineProperty\s*\(\s*Object\.prototype/, label: 'inject:proto-pollution' },
 ];
 
-export const JS_EXTENSIONS = new Set(['.js', '.mjs', '.cjs']);
+export const JS_EXTENSIONS = new Set([
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.jsx',
+  '.ts',
+  '.mts',
+  '.cts',
+  '.tsx',
+]);

@@ -31,7 +31,7 @@ Every source file inside the downloaded artifact is scanned with a catalogue of 
 | `exec:eval` | `eval(` | Arbitrary code execution from a string |
 | `exec:Function` | `new Function(` | Same as eval, slightly more obfuscated |
 | `exec:vm` | `vm.runIn*`, `vm.Script` | Node sandboxed eval escape |
-| `shell:require-child_process` | `require('child_process')` | Importing the shell execution module |
+| `shell:require-child_process` | `require('child_process')`, `import … from 'node:child_process'`, `import('child_process')` | Importing the shell execution module |
 | `shell:execSync` / `spawnSync` / `execFileSync` | — | Direct shell execution |
 | `exec:dynamic-require` | `require(process.env…)` or `require(var +…)` | Module loaded from a computed name — attacker can swap it at runtime |
 | `deser:yaml.load` | `yaml.load(` | Unsafe YAML deserialization (use `yaml.safeLoad`) |
@@ -47,6 +47,8 @@ Every source file inside the downloaded artifact is scanned with a catalogue of 
 | `cred:ci-token` | `process.env.NAME`, `process.env['NAME']` or `const { NAME } = process.env` for a CI/registry/cloud credential variable (`GITHUB_TOKEN`, `GH_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, `ACTIONS_RUNTIME_TOKEN`, `NPM_TOKEN`, `AWS_*`, `CI_JOB_TOKEN`, … — full list in `src/ecosystems/shared/ci-env.ts`) | Targeted CI credential exfiltration — exact pattern used in **event-stream (2018)**, **ctx (2022)**, **dbus-next (2022)** |
 | `cred:generic-secret` | same access forms for any other `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `*_API_KEY` name | Secret-looking variable read; moderate because many SDKs read their own configured token |
 | `inject:proto-pollution` | `__proto__` assignment or `Object.defineProperty(Object.prototype…)` | Prototype pollution enabling property injection across the entire runtime |
+
+JavaScript and Deno sources are scanned with the extensions `.js .mjs .cjs .jsx .ts .mts .cts .tsx`; TypeScript declaration files (`*.d.ts`, `*.d.mts`, `*.d.cts`) are skipped.
 
 #### Python patterns
 

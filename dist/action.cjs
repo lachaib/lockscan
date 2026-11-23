@@ -31491,6 +31491,7 @@ function classifyLink(name, target, relativeToEntry) {
   const resolved = import_node_path11.posix.normalize(import_node_path11.posix.join(base, target.replace(/\\/g, "/")));
   return { name, target, escapes: resolved === ".." || resolved.startsWith("../") };
 }
+var DECLARATION_FILE = /\.d\.[cm]?ts$/;
 var SKIP_DIRS = /* @__PURE__ */ new Set([
   "__pycache__",
   ".git",
@@ -31583,6 +31584,7 @@ function extractZip(data, fileExtensions) {
   for (const entry of zip.getEntries()) {
     if (entry.isDirectory || isZipSymlink(entry)) continue;
     if (!fileExtensions.has((0, import_node_path11.extname)(entry.entryName))) continue;
+    if (DECLARATION_FILE.test(entry.entryName)) continue;
     try {
       files.set(entry.entryName, entry.getData().toString("utf8"));
     } catch {
@@ -31614,7 +31616,7 @@ async function walkDir(baseDir, currentDir, extensions, files, readAs, skipDirs,
       if (!skipDirs.has(entry)) {
         await walkDir(baseDir, fullPath, extensions, files, readAs, skipDirs, accept);
       }
-    } else if (extensions.has((0, import_node_path11.extname)(entry))) {
+    } else if (extensions.has((0, import_node_path11.extname)(entry)) && !DECLARATION_FILE.test(entry)) {
       const rel = (0, import_node_path11.relative)(baseDir, fullPath);
       try {
         const content = await readAs(fullPath);
@@ -33197,13 +33199,14 @@ var GENERIC_SECRET_NAME = `(?!${CI_NAME}(?![\\w$]))[A-Z][A-Z0-9_]*_(?:TOKEN|SECR
 var envAccess = (name) => new RegExp(
   `process\\.env(?:\\.${name}(?![\\w$])|\\[\\s*['"\`]${name}['"\`]\\s*\\])|\\{[^}]*?(?<![\\w$])${name}(?![\\w$])[^}]*\\}\\s*=\\s*process\\.env\\b`
 );
+var MODULE_REF = `(?:\\brequire\\s*\\(\\s*|\\bimport\\s*\\(\\s*|\\bfrom\\s+|\\bimport\\s+)['"](?:node:)?`;
 var DANGEROUS_PATTERNS = [
   // Code execution
   { regex: /\beval\s*\(/, label: "exec:eval" },
   { regex: /new\s+Function\s*\(/, label: "exec:Function" },
   { regex: /\bvm\.(runIn|createContext|Script\b)/, label: "exec:vm" },
   // Shell execution
-  { regex: /require\s*\(\s*['"]child_process['"]/, label: "shell:require-child_process" },
+  { regex: new RegExp(`${MODULE_REF}child_process['"]`), label: "shell:require-child_process" },
   { regex: /\bexecSync\s*\(/, label: "shell:execSync" },
   { regex: /\bspawnSync\s*\(/, label: "shell:spawnSync" },
   { regex: /\bexecFileSync\s*\(/, label: "shell:execFileSync" },
@@ -33241,7 +33244,16 @@ var DANGEROUS_PATTERNS = [
   { regex: /__proto__\s*[:[{]/, label: "inject:proto-pollution" },
   { regex: /Object\.defineProperty\s*\(\s*Object\.prototype/, label: "inject:proto-pollution" }
 ];
-var JS_EXTENSIONS = /* @__PURE__ */ new Set([".js", ".mjs", ".cjs"]);
+var JS_EXTENSIONS = /* @__PURE__ */ new Set([
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".jsx",
+  ".ts",
+  ".mts",
+  ".cts",
+  ".tsx"
+]);
 
 // src/ecosystems/deno/patterns.ts
 var denoEnvGet = (name) => new RegExp(`Deno\\.env\\.get\\s*\\(\\s*['"]${name}['"]`);
@@ -33270,8 +33282,8 @@ var DENO_PATTERNS = [
   }
 ];
 var DANGEROUS_PATTERNS2 = [...DANGEROUS_PATTERNS, ...DENO_PATTERNS];
-var NPM_EXTENSIONS = /* @__PURE__ */ new Set([".js", ".mjs", ".cjs"]);
-var JSR_EXTENSIONS = /* @__PURE__ */ new Set([".ts", ".tsx", ".js", ".mjs", ".jsx"]);
+var NPM_EXTENSIONS = JS_EXTENSIONS;
+var JSR_EXTENSIONS = /* @__PURE__ */ new Set([...JS_EXTENSIONS]);
 
 // src/ecosystems/deno/index.ts
 async function scanNpmArtifact(data, destDir, keep) {
