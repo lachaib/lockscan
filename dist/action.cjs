@@ -27473,7 +27473,8 @@ var MODERATE_PATTERNS = /* @__PURE__ */ new Set([
   "exec:dynamic-require",
   "exec:dynamic-load-path",
   "deser:yaml.load",
-  "deser:generic"
+  "deser:generic",
+  "cred:generic-secret"
 ]);
 var PATTERN_FAMILIES = {
   "dynamic-import": [
@@ -33154,7 +33155,48 @@ function computeJsrMetadataDelta(oldMeta, newMeta) {
   };
 }
 
+// src/ecosystems/shared/ci-env.ts
+var CI_ENV_NAMES = [
+  "GITHUB_TOKEN",
+  "GH_TOKEN",
+  "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+  "ACTIONS_ID_TOKEN_REQUEST_URL",
+  "ACTIONS_RUNTIME_TOKEN",
+  "ACTIONS_RUNTIME_URL",
+  "ACTIONS_CACHE_URL",
+  "ACTIONS_RESULTS_URL",
+  "GITLAB_TOKEN",
+  "CI_JOB_TOKEN",
+  "CI_REGISTRY_PASSWORD",
+  "CI_DEPLOY_PASSWORD",
+  "CIRCLE_TOKEN",
+  "SYSTEM_ACCESSTOKEN",
+  "NPM_TOKEN",
+  "NODE_AUTH_TOKEN",
+  "YARN_NPM_AUTH_TOKEN",
+  "PYPI_TOKEN",
+  "TWINE_PASSWORD",
+  "COMPOSER_AUTH",
+  "PACKAGIST_TOKEN",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "GOOGLE_APPLICATION_CREDENTIALS",
+  "AZURE_CLIENT_SECRET",
+  "VERCEL_TOKEN",
+  "CODECOV_TOKEN",
+  "FIREBASE_TOKEN",
+  "HEROKU_API_KEY",
+  "SENTRY_AUTH_TOKEN",
+  "DOCKER_PASSWORD"
+];
+var CI_NAME = `(?:${CI_ENV_NAMES.join("|")})`;
+var GENERIC_SECRET_NAME = `(?!${CI_NAME}(?![\\w$]))[A-Z][A-Z0-9_]*_(?:TOKEN|SECRET|PASSWORD|API_KEY)`;
+
 // src/ecosystems/javascript/patterns.ts
+var envAccess = (name) => new RegExp(
+  `process\\.env(?:\\.${name}(?![\\w$])|\\[\\s*['"\`]${name}['"\`]\\s*\\])|\\{[^}]*?(?<![\\w$])${name}(?![\\w$])[^}]*\\}\\s*=\\s*process\\.env\\b`
+);
 var DANGEROUS_PATTERNS = [
   // Code execution
   { regex: /\beval\s*\(/, label: "exec:eval" },
@@ -33192,11 +33234,9 @@ var DANGEROUS_PATTERNS = [
   { regex: /\bfs\.promises\.(writeFile|rm|unlink|mkdir)\b/, label: "fs:async-write" },
   // Process / environment
   { regex: /\bprocess\.env\b/, label: "info:process.env" },
-  // Targeted CI credential access (event-stream / ctx / dbus-next pattern)
-  {
-    regex: /process\.env\.(GITHUB_TOKEN|NPM_TOKEN|NODE_AUTH_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|VERCEL_TOKEN|CODECOV_TOKEN|FIREBASE_TOKEN|HEROKU_API_KEY)/,
-    label: "cred:ci-token"
-  },
+  // Targeted CI credential access
+  { regex: envAccess(CI_NAME), label: "cred:ci-token" },
+  { regex: envAccess(GENERIC_SECRET_NAME), label: "cred:generic-secret" },
   // Prototype pollution (Object.prototype tampering)
   { regex: /__proto__\s*[:[{]/, label: "inject:proto-pollution" },
   { regex: /Object\.defineProperty\s*\(\s*Object\.prototype/, label: "inject:proto-pollution" }
@@ -33204,6 +33244,7 @@ var DANGEROUS_PATTERNS = [
 var JS_EXTENSIONS = /* @__PURE__ */ new Set([".js", ".mjs", ".cjs"]);
 
 // src/ecosystems/deno/patterns.ts
+var denoEnvGet = (name) => new RegExp(`Deno\\.env\\.get\\s*\\(\\s*['"]${name}['"]`);
 var DENO_PATTERNS = [
   // Subprocess execution
   { regex: /\bnew\s+Deno\.Command\s*\(/, label: "exec:Deno.Command" },
@@ -33215,10 +33256,8 @@ var DENO_PATTERNS = [
   // Environment access
   { regex: /\bDeno\.env\.(?:get|toObject|has)\s*\(/, label: "info:Deno.env" },
   // CI token targeting via Deno.env
-  {
-    regex: /Deno\.env\.get\s*\(\s*['"](?:GITHUB_TOKEN|NPM_TOKEN|NODE_AUTH_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|VERCEL_TOKEN|CODECOV_TOKEN|FIREBASE_TOKEN|HEROKU_API_KEY)['"]/,
-    label: "cred:ci-token"
-  },
+  { regex: denoEnvGet(CI_NAME), label: "cred:ci-token" },
+  { regex: denoEnvGet(GENERIC_SECRET_NAME), label: "cred:generic-secret" },
   // Raw TCP/TLS connections — typical C2 exfiltration channel
   { regex: /\bDeno\.connect\s*\(/, label: "net:Deno.connect" },
   { regex: /\bDeno\.connectTls\s*\(/, label: "net:Deno.connectTls" },
@@ -33723,6 +33762,7 @@ async function fetchPackagistWithVersions(name, version) {
 }
 
 // src/ecosystems/php/patterns.ts
+var envAccess2 = (name) => new RegExp(`(?:getenv\\s*\\(|\\$_(?:ENV|SERVER)\\s*\\[)\\s*['"]${name}['"]`);
 var DANGEROUS_PATTERNS3 = [
   // Code execution
   { regex: /\beval\s*\(/, label: "exec:eval" },
@@ -33771,10 +33811,8 @@ var DANGEROUS_PATTERNS3 = [
   { regex: /\$_ENV\b/, label: "info:$_ENV" },
   { regex: /\$_SERVER\b/, label: "info:$_SERVER" },
   // Targeted CI credential access
-  {
-    regex: /getenv\s*\(\s*['"](?:GITHUB_TOKEN|COMPOSER_AUTH|PACKAGIST_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|HEROKU_API_KEY|CODECOV_TOKEN)['"]/,
-    label: "cred:ci-token"
-  }
+  { regex: envAccess2(CI_NAME), label: "cred:ci-token" },
+  { regex: envAccess2(GENERIC_SECRET_NAME), label: "cred:generic-secret" }
 ];
 var PHP_EXTENSIONS = /* @__PURE__ */ new Set([".php", ".phtml", ".php5", ".php7", ".phps"]);
 
@@ -33931,6 +33969,7 @@ var PhpAnalyzer = class {
 var import_node_path15 = require("path");
 
 // src/ecosystems/python/patterns.ts
+var envAccess3 = (name) => new RegExp(`os\\.(?:environ(?:\\.get)?|getenv)\\s*[(\\[]\\s*['"]${name}['"]`);
 var DANGEROUS_PATTERNS4 = [
   // Builtins only: `re.compile(...)` or `model.eval()` are attribute calls, `builtins.eval(...)` is not.
   { regex: /(?<![.\w])(?:_{0,2}builtins_{0,2}\.)?eval\s*\(/, label: "exec:eval" },
@@ -33960,16 +33999,15 @@ var DANGEROUS_PATTERNS4 = [
   // Native library loading via ctypes / cffi (can bypass Python-level analysis entirely)
   { regex: /\bctypes\.CDLL\s*\(|ctypes\.cdll\.LoadLibrary\s*\(/, label: "native:ctypes-load" },
   { regex: /\bcffi\.FFI\s*\(\)|ffi\.dlopen\s*\(/, label: "native:cffi-load" },
-  // Targeted CI / secret credential access (similar to event-stream pattern but in Python)
-  {
-    regex: /os\.environ(?:\.get)?\s*\(?\s*['"](?:GITHUB_TOKEN|NPM_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|PYPI_TOKEN|TWINE_PASSWORD|CODECOV_TOKEN)/,
-    label: "cred:ci-token"
-  }
+  // Targeted CI / secret credential access
+  { regex: envAccess3(CI_NAME), label: "cred:ci-token" },
+  { regex: envAccess3(GENERIC_SECRET_NAME), label: "cred:generic-secret" }
 ];
 var STRING_SCOPED_LABELS = /* @__PURE__ */ new Set([
   "obfusc:hex-escape",
   "fs:file-write",
-  "cred:ci-token"
+  "cred:ci-token",
+  "cred:generic-secret"
 ]);
 var PY_EXTENSIONS = /* @__PURE__ */ new Set([".py"]);
 

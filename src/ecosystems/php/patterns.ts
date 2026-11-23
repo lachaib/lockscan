@@ -1,4 +1,9 @@
+import { CI_NAME, GENERIC_SECRET_NAME } from '../shared/ci-env.js';
 import type { Pattern } from '../shared/scan.js';
+
+// `getenv('NAME')`, `$_ENV['NAME']` and `$_SERVER['NAME']`.
+const envAccess = (name: string): RegExp =>
+  new RegExp(`(?:getenv\\s*\\(|\\$_(?:ENV|SERVER)\\s*\\[)\\s*['"]${name}['"]`);
 
 export const DANGEROUS_PATTERNS: Pattern[] = [
   // Code execution
@@ -48,11 +53,8 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   { regex: /\$_ENV\b/, label: 'info:$_ENV' },
   { regex: /\$_SERVER\b/, label: 'info:$_SERVER' },
   // Targeted CI credential access
-  {
-    regex:
-      /getenv\s*\(\s*['"](?:GITHUB_TOKEN|COMPOSER_AUTH|PACKAGIST_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|HEROKU_API_KEY|CODECOV_TOKEN)['"]/,
-    label: 'cred:ci-token',
-  },
+  { regex: envAccess(CI_NAME), label: 'cred:ci-token' },
+  { regex: envAccess(GENERIC_SECRET_NAME), label: 'cred:generic-secret' },
 ];
 
 export const PHP_EXTENSIONS = new Set(['.php', '.phtml', '.php5', '.php7', '.phps']);

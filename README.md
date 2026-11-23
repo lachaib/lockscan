@@ -44,7 +44,8 @@ Every source file inside the downloaded artifact is scanned with a catalogue of 
 | `net:http` / `net:fetch` / `net:axios` / `net:got` | — | Outbound network I/O — expected in a network library, suspicious in a math/utility package |
 | `fs:writeFileSync` / `fs:async-write` / `fs:rmSync` / `fs:unlinkSync` | — | Filesystem writes and deletes |
 | `info:process.env` | `process.env` | Environment variable access |
-| `cred:ci-token` | `process.env.GITHUB_TOKEN`, `AWS_SECRET_ACCESS_KEY`, `NPM_TOKEN`, `CI_JOB_TOKEN`, `CIRCLE_TOKEN`, `VERCEL_TOKEN`, `CODECOV_TOKEN`, `FIREBASE_TOKEN`, `HEROKU_API_KEY`, `NODE_AUTH_TOKEN` | Targeted CI credential exfiltration — exact pattern used in **event-stream (2018)**, **ctx (2022)**, **dbus-next (2022)** |
+| `cred:ci-token` | `process.env.NAME`, `process.env['NAME']` or `const { NAME } = process.env` for a CI/registry/cloud credential variable (`GITHUB_TOKEN`, `GH_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, `ACTIONS_RUNTIME_TOKEN`, `NPM_TOKEN`, `AWS_*`, `CI_JOB_TOKEN`, … — full list in `src/ecosystems/shared/ci-env.ts`) | Targeted CI credential exfiltration — exact pattern used in **event-stream (2018)**, **ctx (2022)**, **dbus-next (2022)** |
+| `cred:generic-secret` | same access forms for any other `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `*_API_KEY` name | Secret-looking variable read; moderate because many SDKs read their own configured token |
 | `inject:proto-pollution` | `__proto__` assignment or `Object.defineProperty(Object.prototype…)` | Prototype pollution enabling property injection across the entire runtime |
 
 #### Python patterns
@@ -64,7 +65,7 @@ Every source file inside the downloaded artifact is scanned with a catalogue of 
 | `fs:file-write` / `fs:file-delete` / `fs:dir-delete` | `open(…,'w')`, `os.remove(`, `shutil.rmtree(` | Filesystem modification and deletion |
 | `native:ctypes-load` | `ctypes.CDLL(`, `ctypes.cdll.LoadLibrary(` | Loads a shared library dynamically — bypasses Python-level analysis entirely |
 | `native:cffi-load` | `cffi.FFI()`, `ffi.dlopen(` | Same via the C Foreign Function Interface |
-| `cred:ci-token` | `os.environ[…'GITHUB_TOKEN']`, `AWS_ACCESS_KEY_ID`, `PYPI_TOKEN`, `TWINE_PASSWORD`, `CODECOV_TOKEN` | Targeted CI credential exfiltration in Python |
+| `cred:ci-token` / `cred:generic-secret` | `os.environ["NAME"]`, `os.environ.get("NAME")`, `os.getenv("NAME")` with the same variable list as JavaScript | Targeted CI credential exfiltration in Python |
 
 Python sources are matched after blanking comments, docstrings and string contents (f-strings are kept, since they hold expressions), so a name in a comment or string literal is not a hit. `obfusc:hex-escape`, `fs:file-write` and `cred:ci-token` read string literals and run on a view that keeps single-line strings. On ddtrace 4.15.6 this cut the hits from 626 to 137 (`net:http-lib` 354 → 23, `exec:compile` 144 → 10).
 

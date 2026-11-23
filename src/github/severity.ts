@@ -41,6 +41,7 @@ const MODERATE_PATTERNS = new Set([
   'exec:dynamic-load-path',
   'deser:yaml.load',
   'deser:generic',
+  'cred:generic-secret',
 ]);
 
 // Groups of labels that represent the same underlying capability. When the family's

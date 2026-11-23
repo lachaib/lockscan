@@ -1,4 +1,9 @@
+import { CI_NAME, GENERIC_SECRET_NAME } from '../shared/ci-env.js';
 import type { Pattern } from '../shared/scan.js';
+
+// `os.environ["NAME"]`, `os.environ.get("NAME")` and `os.getenv("NAME")`.
+const envAccess = (name: string): RegExp =>
+  new RegExp(`os\\.(?:environ(?:\\.get)?|getenv)\\s*[(\\[]\\s*['"]${name}['"]`);
 
 export const DANGEROUS_PATTERNS: Pattern[] = [
   // Builtins only: `re.compile(...)` or `model.eval()` are attribute calls, `builtins.eval(...)` is not.
@@ -30,12 +35,9 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   // Native library loading via ctypes / cffi (can bypass Python-level analysis entirely)
   { regex: /\bctypes\.CDLL\s*\(|ctypes\.cdll\.LoadLibrary\s*\(/, label: 'native:ctypes-load' },
   { regex: /\bcffi\.FFI\s*\(\)|ffi\.dlopen\s*\(/, label: 'native:cffi-load' },
-  // Targeted CI / secret credential access (similar to event-stream pattern but in Python)
-  {
-    regex:
-      /os\.environ(?:\.get)?\s*\(?\s*['"](?:GITHUB_TOKEN|NPM_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|PYPI_TOKEN|TWINE_PASSWORD|CODECOV_TOKEN)/,
-    label: 'cred:ci-token',
-  },
+  // Targeted CI / secret credential access
+  { regex: envAccess(CI_NAME), label: 'cred:ci-token' },
+  { regex: envAccess(GENERIC_SECRET_NAME), label: 'cred:generic-secret' },
 ];
 
 /** Labels whose evidence is a string literal; they run on a view that keeps short strings. */
@@ -43,6 +45,7 @@ export const STRING_SCOPED_LABELS = new Set([
   'obfusc:hex-escape',
   'fs:file-write',
   'cred:ci-token',
+  'cred:generic-secret',
 ]);
 
 export const PY_EXTENSIONS = new Set(['.py']);

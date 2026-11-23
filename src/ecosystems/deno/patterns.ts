@@ -1,5 +1,9 @@
 import { DANGEROUS_PATTERNS as JS_PATTERNS } from '../javascript/patterns.js';
+import { CI_NAME, GENERIC_SECRET_NAME } from '../shared/ci-env.js';
 import type { Pattern } from '../shared/scan.js';
+
+const denoEnvGet = (name: string): RegExp =>
+  new RegExp(`Deno\\.env\\.get\\s*\\(\\s*['"]${name}['"]`);
 
 // Deno native APIs not covered by the JS pattern set
 const DENO_PATTERNS: Pattern[] = [
@@ -13,11 +17,8 @@ const DENO_PATTERNS: Pattern[] = [
   // Environment access
   { regex: /\bDeno\.env\.(?:get|toObject|has)\s*\(/, label: 'info:Deno.env' },
   // CI token targeting via Deno.env
-  {
-    regex:
-      /Deno\.env\.get\s*\(\s*['"](?:GITHUB_TOKEN|NPM_TOKEN|NODE_AUTH_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|VERCEL_TOKEN|CODECOV_TOKEN|FIREBASE_TOKEN|HEROKU_API_KEY)['"]/,
-    label: 'cred:ci-token',
-  },
+  { regex: denoEnvGet(CI_NAME), label: 'cred:ci-token' },
+  { regex: denoEnvGet(GENERIC_SECRET_NAME), label: 'cred:generic-secret' },
   // Raw TCP/TLS connections — typical C2 exfiltration channel
   { regex: /\bDeno\.connect\s*\(/, label: 'net:Deno.connect' },
   { regex: /\bDeno\.connectTls\s*\(/, label: 'net:Deno.connectTls' },

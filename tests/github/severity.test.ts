@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { withSeverity } from '../../src/github/severity.js';
+import { patternSeverity, withSeverity } from '../../src/github/severity.js';
 import type { PackageAnalysis } from '../../src/types.js';
 
 const base: PackageAnalysis = {
@@ -76,5 +76,12 @@ describe('report severity summary', () => {
       moderate: 0,
       low: 0,
     });
+  });
+});
+
+describe('patternSeverity — credential labels', () => {
+  it('ci-token is critical and generic-secret is moderate', () => {
+    expect(patternSeverity('cred:ci-token')).toBe('critical');
+    expect(patternSeverity('cred:generic-secret')).toBe('moderate');
   });
 });

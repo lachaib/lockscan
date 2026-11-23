@@ -1,4 +1,11 @@
+import { CI_NAME, GENERIC_SECRET_NAME } from '../shared/ci-env.js';
 import type { Pattern } from '../shared/scan.js';
+
+// `process.env.NAME`, `process.env['NAME']` and `const { NAME } = process.env`.
+const envAccess = (name: string): RegExp =>
+  new RegExp(
+    `process\\.env(?:\\.${name}(?![\\w$])|\\[\\s*['"\`]${name}['"\`]\\s*\\])|\\{[^}]*?(?<![\\w$])${name}(?![\\w$])[^}]*\\}\\s*=\\s*process\\.env\\b`,
+  );
 
 export const DANGEROUS_PATTERNS: Pattern[] = [
   // Code execution
@@ -37,12 +44,9 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   { regex: /\bfs\.promises\.(writeFile|rm|unlink|mkdir)\b/, label: 'fs:async-write' },
   // Process / environment
   { regex: /\bprocess\.env\b/, label: 'info:process.env' },
-  // Targeted CI credential access (event-stream / ctx / dbus-next pattern)
-  {
-    regex:
-      /process\.env\.(GITHUB_TOKEN|NPM_TOKEN|NODE_AUTH_TOKEN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|CI_JOB_TOKEN|CIRCLE_TOKEN|VERCEL_TOKEN|CODECOV_TOKEN|FIREBASE_TOKEN|HEROKU_API_KEY)/,
-    label: 'cred:ci-token',
-  },
+  // Targeted CI credential access
+  { regex: envAccess(CI_NAME), label: 'cred:ci-token' },
+  { regex: envAccess(GENERIC_SECRET_NAME), label: 'cred:generic-secret' },
   // Prototype pollution (Object.prototype tampering)
   { regex: /__proto__\s*[:[{]/, label: 'inject:proto-pollution' },
   { regex: /Object\.defineProperty\s*\(\s*Object\.prototype/, label: 'inject:proto-pollution' },
