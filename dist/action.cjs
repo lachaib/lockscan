@@ -6,7 +6,11 @@ var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __copyProps = (to2, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
@@ -28274,7 +28278,7 @@ var import_promises2 = require("fs/promises");
 var import_node_path11 = require("path");
 var import_adm_zip = __toESM(require_adm_zip(), 1);
 
-// node_modules/.pnpm/tar@7.5.22/node_modules/tar/dist/esm/index.min.js
+// node_modules/.pnpm/tar@7.5.23/node_modules/tar/dist/esm/index.min.js
 var import_events = __toESM(require("events"), 1);
 var import_fs3 = __toESM(require("fs"), 1);
 var import_node_events = require("events");
