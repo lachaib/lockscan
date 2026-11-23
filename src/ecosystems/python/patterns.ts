@@ -46,6 +46,9 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   // Targeted CI / secret credential access
   { regex: envAccess(CI_NAME), label: 'cred:ci-token' },
   { regex: envAccess(GENERIC_SECRET_NAME), label: 'cred:generic-secret' },
+  // Git credentials persisted by CI checkouts (http.<url>.extraheader, .git-credentials); literals only
+  { regex: /\bextraheader\b|\.git-credentials\b/i, label: 'cred:git-credentials' },
+  { regex: /(?<![\w.-])\.git[\\/]|['"`]\.git['"`]/, label: 'fs:git-dir' },
 ];
 
 /** Labels whose evidence is a string literal; they run on a view that keeps short strings. */
@@ -54,6 +57,8 @@ export const STRING_SCOPED_LABELS = new Set([
   'fs:file-write',
   'cred:ci-token',
   'cred:generic-secret',
+  'cred:git-credentials',
+  'fs:git-dir',
 ]);
 
 export const PY_EXTENSIONS = new Set(['.py']);

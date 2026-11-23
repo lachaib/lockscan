@@ -27447,7 +27447,7 @@ var SEVERITY_RANK = {
   moderate: 2,
   low: 1
 };
-var CRITICAL_PATTERNS = /* @__PURE__ */ new Set(["cred:ci-token"]);
+var CRITICAL_PATTERNS = /* @__PURE__ */ new Set(["cred:ci-token", "cred:git-credentials"]);
 var HIGH_PATTERNS = /* @__PURE__ */ new Set([
   "archive:symlink-escape",
   "exec:eval",
@@ -27483,6 +27483,7 @@ var MODERATE_PATTERNS = /* @__PURE__ */ new Set([
   "deser:yaml.load",
   "deser:generic",
   "cred:generic-secret",
+  "fs:git-dir",
   ...SOCKET_LABELS
 ]);
 var PATTERN_FAMILIES = {
@@ -33258,6 +33259,9 @@ var DANGEROUS_PATTERNS = [
   // Targeted CI credential access
   { regex: envAccess(CI_NAME), label: "cred:ci-token" },
   { regex: envAccess(GENERIC_SECRET_NAME), label: "cred:generic-secret" },
+  // Git credentials persisted by CI checkouts (http.<url>.extraheader, .git-credentials); literals only
+  { regex: /\bextraheader\b|\.git-credentials\b/i, label: "cred:git-credentials" },
+  { regex: /(?<![\w.-])\.git[\\/]|['"`]\.git['"`]/, label: "fs:git-dir" },
   // Prototype pollution (Object.prototype tampering)
   { regex: /__proto__\s*[:[{]/, label: "inject:proto-pollution" },
   { regex: /Object\.defineProperty\s*\(\s*Object\.prototype/, label: "inject:proto-pollution" }
@@ -33843,7 +33847,10 @@ var DANGEROUS_PATTERNS3 = [
   { regex: /\$_SERVER\b/, label: "info:$_SERVER" },
   // Targeted CI credential access
   { regex: envAccess2(CI_NAME), label: "cred:ci-token" },
-  { regex: envAccess2(GENERIC_SECRET_NAME), label: "cred:generic-secret" }
+  { regex: envAccess2(GENERIC_SECRET_NAME), label: "cred:generic-secret" },
+  // Git credentials persisted by CI checkouts (http.<url>.extraheader, .git-credentials); literals only
+  { regex: /\bextraheader\b|\.git-credentials\b/i, label: "cred:git-credentials" },
+  { regex: /(?<![\w.-])\.git[\\/]|['"`]\.git['"`]/, label: "fs:git-dir" }
 ];
 var PHP_EXTENSIONS = /* @__PURE__ */ new Set([".php", ".phtml", ".php5", ".php7", ".phps"]);
 
@@ -34039,13 +34046,18 @@ var DANGEROUS_PATTERNS4 = [
   { regex: /\bcffi\.FFI\s*\(\)|ffi\.dlopen\s*\(/, label: "native:cffi-load" },
   // Targeted CI / secret credential access
   { regex: envAccess3(CI_NAME), label: "cred:ci-token" },
-  { regex: envAccess3(GENERIC_SECRET_NAME), label: "cred:generic-secret" }
+  { regex: envAccess3(GENERIC_SECRET_NAME), label: "cred:generic-secret" },
+  // Git credentials persisted by CI checkouts (http.<url>.extraheader, .git-credentials); literals only
+  { regex: /\bextraheader\b|\.git-credentials\b/i, label: "cred:git-credentials" },
+  { regex: /(?<![\w.-])\.git[\\/]|['"`]\.git['"`]/, label: "fs:git-dir" }
 ];
 var STRING_SCOPED_LABELS = /* @__PURE__ */ new Set([
   "obfusc:hex-escape",
   "fs:file-write",
   "cred:ci-token",
-  "cred:generic-secret"
+  "cred:generic-secret",
+  "cred:git-credentials",
+  "fs:git-dir"
 ]);
 var PY_EXTENSIONS = /* @__PURE__ */ new Set([".py"]);
 

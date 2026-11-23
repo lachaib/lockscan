@@ -10,7 +10,7 @@ export const SEVERITY_RANK: Record<Severity, number> = {
 };
 
 // Patterns that directly exfiltrate credentials — treat as critical regardless of context.
-const CRITICAL_PATTERNS = new Set(['cred:ci-token']);
+const CRITICAL_PATTERNS = new Set(['cred:ci-token', 'cred:git-credentials']);
 
 // Patterns that enable arbitrary code execution.
 const HIGH_PATTERNS = new Set([
@@ -52,6 +52,7 @@ const MODERATE_PATTERNS = new Set([
   'deser:yaml.load',
   'deser:generic',
   'cred:generic-secret',
+  'fs:git-dir',
   ...SOCKET_LABELS,
 ]);
 

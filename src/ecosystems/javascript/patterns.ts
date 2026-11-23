@@ -58,6 +58,9 @@ export const DANGEROUS_PATTERNS: Pattern[] = [
   // Targeted CI credential access
   { regex: envAccess(CI_NAME), label: 'cred:ci-token' },
   { regex: envAccess(GENERIC_SECRET_NAME), label: 'cred:generic-secret' },
+  // Git credentials persisted by CI checkouts (http.<url>.extraheader, .git-credentials); literals only
+  { regex: /\bextraheader\b|\.git-credentials\b/i, label: 'cred:git-credentials' },
+  { regex: /(?<![\w.-])\.git[\\/]|['"`]\.git['"`]/, label: 'fs:git-dir' },
   // Prototype pollution (Object.prototype tampering)
   { regex: /__proto__\s*[:[{]/, label: 'inject:proto-pollution' },
   { regex: /Object\.defineProperty\s*\(\s*Object\.prototype/, label: 'inject:proto-pollution' },

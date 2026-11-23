@@ -49,6 +49,8 @@ Every source file inside the downloaded artifact is scanned with a catalogue of 
 | `info:process.env` | `process.env` | Environment variable access |
 | `cred:ci-token` | `process.env.NAME`, `process.env['NAME']` or `const { NAME } = process.env` for a CI/registry/cloud credential variable (`GITHUB_TOKEN`, `GH_TOKEN`, `ACTIONS_ID_TOKEN_REQUEST_TOKEN`, `ACTIONS_RUNTIME_TOKEN`, `NPM_TOKEN`, `AWS_*`, `CI_JOB_TOKEN`, … — full list in `src/ecosystems/shared/ci-env.ts`) | Targeted CI credential exfiltration — exact pattern used in **event-stream (2018)**, **ctx (2022)**, **dbus-next (2022)** |
 | `cred:generic-secret` | same access forms for any other `*_TOKEN`, `*_SECRET`, `*_PASSWORD`, `*_API_KEY` name | Secret-looking variable read; moderate because many SDKs read their own configured token |
+| `cred:git-credentials` | the literals `extraheader` (git `http.<url>.extraheader`) or `.git-credentials` | CI checkouts persist their token in `.git/config`; reading it yields the credential without touching an environment variable. **critical** |
+| `fs:git-dir` | the literal `.git/` path fragment or a quoted `'.git'` segment | Access to git metadata. **moderate**, not higher: hook installers, git wrappers and release tools legitimately read `.git/` |
 | `inject:proto-pollution` | `__proto__` assignment or `Object.defineProperty(Object.prototype…)` | Prototype pollution enabling property injection across the entire runtime |
 
 JavaScript and Deno sources are scanned with the extensions `.js .mjs .cjs .jsx .ts .mts .cts .tsx`; TypeScript declaration files (`*.d.ts`, `*.d.mts`, `*.d.cts`) are skipped.
@@ -71,8 +73,19 @@ JavaScript and Deno sources are scanned with the extensions `.js .mjs .cjs .jsx 
 | `native:ctypes-load` | `ctypes.CDLL(`, `ctypes.cdll.LoadLibrary(` | Loads a shared library dynamically — bypasses Python-level analysis entirely |
 | `native:cffi-load` | `cffi.FFI()`, `ffi.dlopen(` | Same via the C Foreign Function Interface |
 | `cred:ci-token` / `cred:generic-secret` | `os.environ["NAME"]`, `os.environ.get("NAME")`, `os.getenv("NAME")` with the same variable list as JavaScript | Targeted CI credential exfiltration in Python |
+| `cred:git-credentials` | the literals `extraheader` (git `http.<url>.extraheader`) or `.git-credentials` | CI checkouts persist their token in `.git/config`; reading it yields the credential without touching an environment variable. **critical** |
+| `fs:git-dir` | the literal `.git/` path fragment or a quoted `'.git'` segment | Access to git metadata. **moderate**, not higher: hook installers, git wrappers and release tools legitimately read `.git/` |
 
 Python sources are matched after blanking comments, docstrings and string contents (f-strings are kept, since they hold expressions), so a name in a comment or string literal is not a hit. `obfusc:hex-escape`, `fs:file-write` and `cred:ci-token` read string literals and run on a view that keeps single-line strings. On ddtrace 4.15.6 this cut the hits from 626 to 137 (`net:http-lib` 354 → 23, `exec:compile` 144 → 10).
+
+#### Known limitations of static pattern scanning
+
+Pattern scanning is best-effort: a tripwire for unsophisticated code, not a security boundary.
+
+- **Literals only.** Detection matches strings as they appear in source. Paths or names that are joined (`['.g', 'it'].join('')`, `dir + '/.git/' + 'config'`), concatenated, decoded (`Buffer.from(…, 'base64')`, `String.fromCharCode`, `bytes.fromhex`), read from another file, or fetched at runtime are not detected. This applies to every pattern, notably `cred:git-credentials`, `fs:git-dir` and `cred:ci-token`.
+- **Evasion is detected only indirectly.** The `obfusc:*` and `exec:dynamic-require` labels flag the techniques used to hide a literal, but not what they hide.
+- **Source text, not behaviour.** Nothing is executed, so a pattern in dead code is a hit and a payload assembled across files may be missed.
+- **Mitigate on the CI side.** Do not rely on lockscan to protect secrets: use `persist-credentials: false` on checkout so no token is left in `.git/config`, give jobs least-privilege and short-lived tokens, prefer OIDC to long-lived secrets, and run installs without secrets in the environment.
 
 ---
 
